@@ -1,0 +1,181 @@
+---
+title: "DK1 imbalance: backtest"
+format:
+  dashboard:
+    theme: [cosmo, theme.scss]
+    embed-resources: true
+    nav-buttons:
+      - text: jacobazu.github.io
+        href: https://jacobazu.github.io/
+      - text: "← Live"
+        href: index.html
+      - icon: github
+        href: https://github.com/jacobazu/dk1-imbalance-forecasting
+    include-in-header:
+      - text: |
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+      - file: stale.html
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| include: false
+source("R/dashboard_setup.R", local = knitr::knit_global())
+```
+
+# Accuracy {scrolling="true"}
+
+## Row {height=170px}
+
+::: {.card title="In short"}
+`r short_txt`
+
+Backtest: each quarter forecast with only the data known at the time, but the forecasts were made afterwards. The live forecasts are on the [main page](index.html).
+:::
+
+## Row {height=500px}
+
+```{r}
+#| title: "How much lower the log loss is than the benchmark, by how far ahead"
+if (has_eval) {
+  sk <- scores |> filter(model %in% c("ens", "mnl", "xgb")) |>
+    mutate(h = factor(horizon_labels[horizon], levels = horizon_labels))
+  p <- plot_ly()
+  cols <- c(ens = "#f97316", mnl = "#2563eb", xgb = "#16a34a")
+  for (m in names(cols)) {
+    x <- sk |> filter(model == m) |> arrange(h)
+    p <- p |> add_trace(data = x, x = ~h, y = ~skill, type = "scatter", mode = "lines+markers",
+                        name = model_labels[[m]], line = list(color = cols[[m]], width = if (m == "ens") 3 else 2),
+                        marker = list(color = cols[[m]], size = 8),
+                        hovertemplate = paste0("%{y:.1%}<extra>", model_labels[[m]], "</extra>"))
+  }
+  p |> chart_layout("Forecast horizon") |>
+    layout(yaxis = list(tickformat = ".0%", zeroline = TRUE),
+           shapes = list(list(type = "line", xref = "paper", x0 = 0, x1 = 1, y0 = 0, y1 = 0,
+                              line = list(color = "#cfc6bb", dash = "dot"))))
+}
+```
+
+::: {.card title="What the backtest shows"}
+
+`r period_txt`
+
+`r eval_txt`
+
+`r spread_txt`
+
+`r value_txt`
+
+:::
+
+## Row {height=460px .tabset}
+
+```{r}
+#| title: "Direction"
+if (has_eval) {
+  scores |>
+    left_join(tests |> filter(model_b == "clim") |> select(horizon, model = model_a, dm_p), by = c("horizon", "model")) |>
+    mutate(h = factor(horizon_labels[horizon], levels = horizon_labels)) |>
+    arrange(h, log_loss) |>
+    transmute(Horizon = as.character(h), Model = unname(model_labels[model]),
+              `Log loss` = round(log_loss, 3), Skill = pct(skill, 1),
+              `DM p vs benchmark` = ifelse(is.na(dm_p), "", ifelse(dm_p < 0.001, "<0.001", format(round(dm_p, 3), nsmall = 3)))) |>
+    knitr::kable(align = "llrrr")
+}
+```
+
+```{r}
+#| title: "Spread"
+if (has_spread) {
+  spread |>
+    filter(model %in% c("ens", "clim", "perfect")) |>
+    select(horizon, model, pinball, value) |>
+    pivot_wider(names_from = model, values_from = c(pinball, value)) |>
+    left_join(sptest |> select(horizon, metric, dm_p) |> pivot_wider(names_from = metric, values_from = dm_p,
+                                                                       names_prefix = "p_"), by = "horizon") |>
+    mutate(h = factor(horizon_labels[horizon], levels = horizon_labels)) |>
+    arrange(h) |>
+    transmute(Horizon = as.character(h), `Pinball ensemble` = sprintf("%.1f", pinball_ens),
+              `Pinball benchmark` = sprintf("%.1f", pinball_clim), Skill = pct(1 - pinball_ens / pinball_clim, 1),
+              `DM p` = ifelse(p_pinball < 0.001, "<0.001", format(round(p_pinball, 3), nsmall = 3)),
+              `Value ensemble (€/MWh)` = sprintf("%.1f", round(value_ens, 1) + 0),
+              `Value benchmark` = sprintf("%.1f", round(value_clim, 1) + 0),
+              `DM p ` = ifelse(p_value < 0.001, "<0.001", format(round(p_value, 3), nsmall = 3)),
+              `Value, direction known` = sprintf("%.1f", value_perfect)) |>
+    knitr::kable(align = "lrrrrrrrr")
+}
+```
+
+```{r}
+#| title: "Calibration"
+if (!is.null(calib)) {
+  p <- plot_ly() |>
+    add_lines(x = c(0, 1), y = c(0, 1), line = list(color = "#cfc6bb", dash = "dot"), name = "Perfect", hoverinfo = "skip")
+  for (h in c("0-1h", "day-ahead")) for (cl in c("down", "up")) {
+    x <- calib |> filter(horizon == h, class == cl)
+    p <- p |> add_trace(data = x, x = ~forecast, y = ~observed, type = "scatter", mode = "lines+markers",
+                        name = paste(dir_labels[[cl]], horizon_labels[[h]]),
+                        line = list(color = dir_colors[[cl]], dash = if (h == "day-ahead") "dash" else "solid"),
+                        marker = list(color = dir_colors[[cl]]),
+                        hovertemplate = "forecast %{x:.0%}, happened %{y:.0%}<extra></extra>")
+  }
+  p |> chart_layout("Forecast probability", "How often it happened") |>
+    layout(xaxis = list(tickformat = ".0%", range = c(0, 1)), yaxis = list(tickformat = ".0%", range = c(0, 1)),
+           hovermode = "closest", legend = list(orientation = "v", x = 1.02, y = 1))
+}
+```
+
+
+# Day-ahead to imbalance {scrolling="true"}
+
+## Row {height=150px}
+
+::: {.card title="The test"}
+1 MW bought or sold on the day-ahead auction and not delivered, so it is settled at the imbalance price. Decided at
+about 10:45 the day before, with the [price forecast](https://jacobazu.github.io/dk1-price-forecasting) in place of the
+spot price: long if the expected spread is above the fees (0.188 €/MWh), short if below minus the fees.
+:::
+
+## Row {height=480px}
+
+```{r}
+#| title: "Cumulative P&L with 1 MW, after fees (backtest)"
+if (!is.null(da_bt_daily)) cum_chart(da_bt_daily)
+```
+
+::: {.card title="What the backtest shows"}
+
+`r da_bt_txt`
+
+The rule was set and committed before the backtest was run: worth trading only if the mean daily P&L is above 0 with p < 0.05 and it beats the benchmark forecast, always long and always short with p < 0.05 (Holm).
+
+:::
+
+## Row {height=330px .tabset}
+
+```{r}
+#| title: "Strategies"
+if (has_da_bt) {
+  da_bt_sum |>
+    transmute(Strategy = label, `€ a day` = format(round(mean_day), big.mark = ","), Total = format(round(total), big.mark = ","),
+              `p (Newey-West)` = ifelse(is.na(p), "", format(round(p, 3), nsmall = 3)),
+              `Days in profit` = pct(days_positive), `Worst day` = format(round(worst_day), big.mark = ","),
+              `Best day` = format(round(best_day), big.mark = ","),
+              `Quarters traded` = pct(traded)) |>
+    knitr::kable(align = "lrrrrrrr")
+}
+```
+
+```{r}
+#| title: "The forecast against the alternatives"
+if (has_da_bt) {
+  da_bt_tests |>
+    transmute(Versus = label, `€ a day more` = round(diff_day, 1),
+              p = format(round(p, 3), nsmall = 3), `p (Holm)` = format(round(p_holm, 3), nsmall = 3)) |>
+    knitr::kable(align = "lrrr")
+}
+```

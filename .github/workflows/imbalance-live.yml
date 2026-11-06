@@ -1,0 +1,102 @@
+# hourly imbalance forecast, from imbalance/ (upstream's live.yml without its dashboard and github pages steps)
+
+name: Imbalance live forecast
+
+on:
+  schedule:
+    # the gate skips an hour that is already saved. github drops many scheduled runs, so there are four attempts an hour
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: imbalance-live
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: imbalance
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - id: check
+        run: |
+          issue=$(date -u +%Y-%m-%dT%H:00:00Z)
+          if awk -F, -v i="$issue" 'NR == 1 {for (k = 1; k <= NF; k++) if ($k == "issue") c = k; next}
+                                    $c == i {f = 1; exit} END {exit !f}' forecasts/intraday_log.csv; then go=false
+          else go=true; fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+          echo "forecast for the hour from $issue UTC, run = $go"
+
+  forecast:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      LANG: C.UTF-8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: renv
+          use-public-rspm: true
+          working-directory: imbalance
+
+      - uses: r-lib/actions/setup-renv@v2
+        with:
+          working-directory: imbalance
+
+      # the fitted models live in the actions cache. if the cache is gone they are fitted again
+      - name: Restore models
+        uses: actions/cache/restore@v6
+        with:
+          path: imbalance/models
+          key: models-${{ github.run_id }}
+          restore-keys: models-
+
+      - name: Forecast and score
+        id: live
+        run: |
+          before=$(sha256sum models/models.rds 2>/dev/null || true)
+          set -o pipefail
+          if ! Rscript scripts/07_live.R 2>&1 | tee live.log; then
+            echo "::error title=07_live.R::$(grep -E -B2 -A3 '^Error|Execution halted' live.log | head -c 900 | tr '\n%' ' p')"
+            exit 1
+          fi
+          rm -f live.log
+          after=$(sha256sum models/models.rds)
+          if [ "$before" != "$after" ]; then echo "refit=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Save models
+        if: steps.live.outputs.refit == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: imbalance/models
+          key: models-${{ github.run_id }}
+
+      - name: Commit the forecasts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add forecasts results live
+          git commit -m "Imbalance forecasts made $(date -u '+%F %H:%M') UTC" || echo "Nothing new to commit"
+          for try in 1 2 3; do
+            if git pull --rebase origin main && git push; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            echo "saving failed (try $try), trying again in 20 seconds"
+            sleep 20
+          done
+          exit 1

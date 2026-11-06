@@ -1,0 +1,273 @@
+---
+title: "DK1 day ahead electricity price"
+format:
+  dashboard:
+    theme: [cosmo, theme.scss]
+    embed-resources: true
+    nav-buttons:
+      - text: jacobazu.github.io
+        href: https://jacobazu.github.io/
+      - text: Backtest
+        href: backtest.html
+      - icon: github
+        href: https://github.com/jacobazu/dk1-price-forecasting
+    include-in-header:
+      - text: |
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+      - file: stale.html
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| include: false
+source("R/dashboard_setup.R", local = knitr::knit_global())
+```
+
+# Forecast
+
+## Row {height=14%}
+
+::: {.card}
+<div class="kpi" style="--accent: #f97316">
+<div>
+<div class="kpi-label">Average price `r format(latest, "%a %d %b")` (`r main_label`)</div>
+<div class="kpi-value">`r eur(mean(tile_fc[[main]]))`<span class="kpi-unit">€/MWh</span></div>
+<div class="kpi-sub">`r diff_html`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-lightning-charge-fill"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #16a34a">
+<div>
+<div class="kpi-label">Cheapest / most expensive hour</div>
+<div class="kpi-value">`r hour_label(cheap$hour)` / `r hour_label(peak$hour)`</div>
+<div class="kpi-sub">`r eur(cheap[[main]])` / `r eur(peak[[main]])` €/MWh</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-arrow-down-up"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #dc2626">
+<div>
+<div class="kpi-label">Chance of a negative price</div>
+<div class="kpi-value">`r neg_val`</div>
+<div class="kpi-sub">`r neg_sub`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-arrow-down-circle-fill"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #c2410c">
+<div>
+<div class="kpi-label">Live accuracy vs naive</div>
+<div class="kpi-value">`r live_improve`</div>
+<div class="kpi-sub">`r live_improve_sub`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-bullseye"></i></div>
+</div>
+:::
+
+## Row {height=86%}
+
+```{r}
+#| title: "Forecast for the next delivery day, with recent actual prices (EUR/MWh)"
+p <- plot_ly() |>
+  add_lines(data = today_act, x = ~hour, y = ~actual,
+            name = paste("Actual", format(latest - 1, "%a %d %b"), "(day before)"),
+            line = list(color = grey, width = 2, dash = "dot"),
+            hovertemplate = paste0("%{y:.1f} €/MWh<extra>", format(latest - 1, "%a %d %b"), "</extra>")) |>
+  add_lines(data = week_act, x = ~hour, y = ~actual,
+            name = paste("Actual", format(latest - 7, "%a %d %b"), "(same weekday last week)"),
+            line = list(color = "#cfc6bb", width = 2, dash = "dash"),
+            hovertemplate = paste0("%{y:.1f} €/MWh<extra>", format(latest - 7, "%a %d %b"), "</extra>"))
+
+# naive left out
+fc_models <- setdiff(models, "naive_mix")
+fc_models <- c(main, setdiff(fc_models, main))   # open on main model
+
+for (m in fc_models) {
+  d <- tomorrow |> select(hour, f = all_of(m)) |> left_join(fan_wide(m), by = "hour") |>
+    mutate(range90 = ifelse(is.na(q0.05), "", sprintf(", 90%%: %.0f to %.0f", q0.05, q0.95)))
+  col <- model_colors[[m]]
+  vis <- m == fc_models[1]
+  p <- p |>
+    add_lines(data = d, x = ~hour, y = ~q0.05, line = list(width = 0), showlegend = FALSE,
+              visible = vis, hoverinfo = "skip") |>
+    add_lines(data = d, x = ~hour, y = ~q0.95, line = list(width = 0), fill = "tonexty",
+              fillcolor = rgba(col, 0.12), name = paste0("90% range, ", q_low(q_method(m))),
+              visible = vis, hoverinfo = "skip") |>
+    add_lines(data = d, x = ~hour, y = ~q0.25, line = list(width = 0), showlegend = FALSE,
+              visible = vis, hoverinfo = "skip") |>
+    add_lines(data = d, x = ~hour, y = ~q0.75, line = list(width = 0), fill = "tonexty",
+              fillcolor = rgba(col, 0.25), name = "50% range",
+              visible = vis, hoverinfo = "skip") |>
+    add_lines(data = d, x = ~hour, y = ~f, text = ~range90,
+              name = paste0(model_labels[[m]], " forecast ", format(latest, "%a %d %b"),
+                            ", made ", format(made_dk, "%a %d %b %H:%M")),
+              visible = vis,
+              line = list(color = col, width = 3),
+              hovertemplate = paste0("%{y:.1f} €/MWh%{text}<extra>", model_labels[[m]], "</extra>"))
+}
+
+p |> chart_layout(fc_models, xtitle = "Hour (Danish time)", n_fixed = 2, per_model = 5) |> layout(xaxis = list(dtick = 3))
+```
+
+# Track record
+
+## Row {height=14%}
+
+::: {.card}
+<div class="kpi" style="--accent: #f97316">
+<div>
+<div class="kpi-label">Days tracked</div>
+<div class="kpi-value">`r n_distinct(scored_all$date)`</div>
+<div class="kpi-sub">`r if (nrow(scored_all) > 0) paste("since", format(min(scored_all$date), "%d %b %Y")) else "starts after the first forecast day"`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-calendar-check-fill"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #16a34a">
+<div>
+<div class="kpi-label">`r main_label` error (MAE)</div>
+<div class="kpi-value">`r mae(main)`</div>
+<div class="kpi-sub">€/MWh, `r window_lab`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-graph-up-arrow"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #6b7280">
+<div>
+<div class="kpi-label">Naive error (MAE)</div>
+<div class="kpi-value">`r mae("naive_mix")`</div>
+<div class="kpi-sub">€/MWh, `r window_lab`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-arrow-repeat"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #c2410c">
+<div>
+<div class="kpi-label">`r live_cov_lab` 90% range, live</div>
+<div class="kpi-value">`r live_cov_val`</div>
+<div class="kpi-sub">`r live_cov_sub`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-distribute-vertical"></i></div>
+</div>
+:::
+
+## Row {height=56%}
+
+```{r}
+#| title: "Live forecasts vs actual prices, up to the last 30 days (EUR/MWh)"
+if (nrow(scored) == 0) {
+  cat("The track record starts once the first forecast day has passed.")
+} else {
+  sc <- scored |> mutate(time = as_datetime(date, tz = "Europe/Copenhagen") + hours(hour))
+
+  p2 <- plot_ly(sc, x = ~time) |>
+    add_lines(y = ~actual, name = "Actual",
+              line = list(color = ink, width = 1.5),
+              hovertemplate = "%{y:.1f} €/MWh<extra>Actual</extra>")
+
+  for (m in models) {
+    p2 <- p2 |>
+      add_lines(y = sc[[m]], name = model_labels[[m]],
+                visible = (m == models[1]),
+                line = list(color = model_colors[[m]], width = 1.5),
+                hovertemplate = paste0("%{y:.1f} €/MWh<extra>", model_labels[[m]], "</extra>"))
+  }
+
+  p2 |> chart_layout(models)
+}
+```
+
+## Row {height=30%}
+
+```{r}
+#| title: "Live accuracy by model, up to the last 30 days"
+acc_live <- bind_rows(lapply(models, \(m) {
+  s <- scored[!is.na(scored[[m]]), ]
+  if (nrow(s) == 0) return(NULL)
+  tibble(Model            = model_labels[[m]],
+         `Days tracked`   = n_distinct(s$date),
+         `MAE (€/MWh)`    = mean(abs(s$actual - s[[m]])),
+         `RMSE (€/MWh)`   = sqrt(mean((s$actual - s[[m]])^2)))
+}))
+if (nrow(acc_live) > 0) {
+  acc_live |> arrange(`MAE (€/MWh)`) |> knitr::kable(digits = 1)
+} else {
+  cat("Starts once a forecast day of these models has passed.")
+}
+```
+
+::: {.card}
+Every forecast was saved before the auction and never changed. With few live days, small differences say
+little yet. The [backtest](backtest.html) has `r eval_acc$n_backtest_days[1]` days.
+:::
+
+# Method {scrolling="true"}
+
+## Row {height=260px}
+
+::: {.card title="Challengers: tested live before they can replace the ensemble"}
+
+```{r}
+#| output: asis
+if (!is.null(chall) && nrow(chall) > 0) {
+  arrow <- function(a, b) ifelse(is.na(a), "\u2013", sprintf("%.1f \u2192 %.1f", a, b))
+  ch_tab <- chall |>
+    transmute(Challenger      = label,
+              `Live days`     = live_days,
+              `Live MAE`      = arrow(live_mae_champion, live_mae_challenger),
+              `Live p (Holm)` = ifelse(is.na(live_p_holm), "\u2013", p_tab(live_p_holm)),
+              Status          = status)
+  if (nrow(chall) == 1) names(ch_tab)[names(ch_tab) == "Live p (Holm)"] <- "Live p"
+  cat(knitr::kable(ch_tab, format = "html", align = "lrrrl",
+                   table.attr = 'class="table table-sm table-striped small"'))
+  cat("\n\nMAE: ensemble \u2192 challenger, €/MWh. ", chall_txt, "\n", sep = "")
+}
+```
+
+:::
+
+## Row {height=640px}
+
+::: {.card title="How it works"}
+
+**Forecast.** Tomorrow's hourly prices (the average of the four quarter-hours), made at about 10:15 the day before and never changed.
+
+**Models.** Four forecasts are made every morning and compared: BMT-X (boosting with multiple testing, from my thesis), LEAR-X (a lasso per hour), XGBoost-X, and the ensemble, their average, which is the headline forecast. Benchmark: the weekly naive. Re-estimated every day on the last two years.
+
+**Inputs.** Only data published before the noon auction. The list is in `inputs.csv`, and the dashboard won't build if the forecast uses anything else.
+
+```{r}
+#| output: asis
+used <- inputs_reg[inputs_reg$status == "used", ]
+cat(knitr::kable(data.frame(Input = used$input, Source = used$source, Published = used$published),
+                 format = "html", table.attr = 'class="table table-sm small"'))
+dropped <- inputs_reg[inputs_reg$status != "used", ]
+cat("\n\nTried and dropped: ", paste0(dropped$input, " (", sub("^dropped: ", "", dropped$status), ")", collapse = "; "), ".\n", sep = "")
+```
+
+**Ranges.** 5–95% quantiles from each model's recent errors. The chance of a negative price comes from the same quantiles.
+
+**Challengers.** Changes run live next to the ensemble and only replace it if they win on a rule set in advance.
+
+**Data:** [Energi Data Service](https://www.energidataservice.dk) (Energinet).<br>
+**Code:** [github.com/jacobazu/dk1-price-forecasting](https://github.com/jacobazu/dk1-price-forecasting)<br>
+**Last updated:** `r format(with_tz(Sys.time(), "Europe/Copenhagen"), "%d %B %Y, %H:%M")` (Danish time)
+
+:::

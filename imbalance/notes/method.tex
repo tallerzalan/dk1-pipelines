@@ -1,0 +1,44 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage[scaled=0.9]{helvet}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{microtype}
+\usepackage{booktabs,tabularx,array}
+\usepackage[authoryear,round]{natbib}
+\usepackage{xcolor}
+\usepackage[colorlinks,linkcolor=black,citecolor=black,urlcolor={blue!60!black}]{hyperref}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+\setlength{\bibsep}{0.2em}
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\pagestyle{empty}
+\begin{document}
+{\sffamily\bfseries\Large DK1 imbalance: methods}\par
+\href{https://github.com/jacobazu/dk1-imbalance-forecasting}{github.com/jacobazu/dk1-imbalance-forecasting} \textperiodcentered{} October 2026
+
+Forecasts of the chance that DK1 is regulated up, down or not at all in each quarter-hour, and of the spread between the imbalance price and spot. Every hour for the next four hours, and once a day for tomorrow.
+
+\begin{center}\small
+\begin{tabularx}{\linewidth}{@{}lL@{}}
+\toprule
+Inputs & Calendar, the spot price, wind and solar forecasts made 48 hours ahead, recent imbalances, and real-time grid data for the next hour. Before the auction the price forecast stands in for spot. \\
+Models & Multinomial lasso \citep{tibshirani1996,friedman2010}, XGBoost \citep{chen2016} and their average, refitted weekly. Benchmark: how often each direction happened over the last 28 days. Spread: past spreads at a similar spot price, weighted by the direction probabilities. \\
+Scoring & Log loss and pinball loss against the benchmark, Diebold--Mariano tests with a Newey--West variance \citep{diebold1995,newey1987}, calibration, and the value of picking a side \citep{bottieau2020}. \\
+Day-ahead to imbalance & A test of whether tomorrow's spread can be forecast before the auction: long or short 1\,MW per quarter on the day-ahead auction, settled at the imbalance price, after fees. Compared with always long, always short and the benchmark with Newey--West and Holm. Paper only. \\
+Rules & Each forecast only uses data published when it is made, and the backtest uses the same inputs. Test rules are written before the test. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{thebibliography}{99}\small
+\bibitem[Bottieau et~al.(2020)]{bottieau2020} Bottieau, J. et al. (2020). Very-short-term probabilistic forecasting for a risk-aware participation in the single price imbalance settlement. \textit{IEEE Transactions on Power Systems}.
+\bibitem[Chen and Guestrin(2016)]{chen2016} Chen, T. and Guestrin, C. (2016). XGBoost: A scalable tree boosting system. \textit{KDD}.
+\bibitem[Diebold and Mariano(1995)]{diebold1995} Diebold, F. X. and Mariano, R. S. (1995). Comparing predictive accuracy. \textit{Journal of Business \& Economic Statistics}.
+\bibitem[Friedman et~al.(2010)]{friedman2010} Friedman, J., Hastie, T. and Tibshirani, R. (2010). Regularization paths for generalized linear models via coordinate descent. \textit{Journal of Statistical Software}.
+\bibitem[Newey and West(1987)]{newey1987} Newey, W. K. and West, K. D. (1987). A simple, positive semi-definite, heteroskedasticity and autocorrelation consistent covariance matrix. \textit{Econometrica}.
+\bibitem[Tibshirani(1996)]{tibshirani1996} Tibshirani, R. (1996). Regression shrinkage and selection via the lasso. \textit{JRSS B}.
+\end{thebibliography}
+\end{document}

@@ -1,0 +1,291 @@
+---
+title: "DK1 day ahead electricity price: backtest"
+format:
+  dashboard:
+    theme: [cosmo, theme.scss]
+    embed-resources: true
+    nav-buttons:
+      - text: jacobazu.github.io
+        href: https://jacobazu.github.io/
+      - text: "← Live"
+        href: index.html
+      - icon: github
+        href: https://github.com/jacobazu/dk1-price-forecasting
+    include-in-header:
+      - text: |
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+      - file: stale.html
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| include: false
+source("R/dashboard_setup.R", local = knitr::knit_global())
+```
+
+# Accuracy {scrolling="true"}
+
+## Row {height=80px}
+
+::: {.card}
+Backtest: rolling out-of-sample forecasts, each made without that day's prices, but made afterwards, plus the live days so far.
+The live forecasts are on the [main page](index.html).
+:::
+
+## Row {height=450px}
+
+```{r}
+#| title: "Accuracy"
+if (has_eval) {
+  acc <- eval_acc
+  if (!is.null(mcs_models)) acc <- left_join(acc, mcs_models, by = "model")
+  acc |>
+    transmute(Model          = unname(long_labels[model]),
+              `MAE (€/MWh)`  = round(mae, 1),
+              `RMSE (€/MWh)` = round(rmse, 1),
+              `rMAE`         = round(rmae, 3),
+              `In MCS (10%)` = if ("in_mcs" %in% names(acc)) ifelse(in_mcs, "yes", "") else "") |>
+    knitr::kable(align = "lrrrr")
+}
+```
+
+::: {.card title="Bias and shape of the day"}
+
+```{r}
+if (has_eval) {
+  eval_bias |>
+    inner_join(eval_shape, by = "model") |>
+    transmute(Model                 = unname(long_labels[model]),
+              `Mean error`          = round(mean_error, 1),
+              `MZ slope`            = round(mz_slope, 2),
+              `MZ p`                = p_tab(mz_p),
+              `Cheapest hour ±1h`   = pct(cheapest_pm1),
+              `Peak hour ±1h`       = pct(peak_pm1),
+              `Rank correlation`    = round(spearman, 2)) |>
+    knitr::kable(align = "lrrrrrr")
+}
+```
+
+`r post_txt`
+
+:::
+
+## Row {height=720px}
+
+::: {.card title="Is the difference significant?"}
+
+Rolling out-of-sample forecasts, `r eval_period`, all models on the same hours.
+
+`r acc_txt` `r sig_txt` `r live_txt`
+
+```{r}
+if (has_eval) {
+  real_m  <- eval_acc$model[!grepl("^naive", eval_acc$model)]
+  naive_b <- eval_acc$model[grepl("^naive", eval_acc$model)][1]
+  others <- setdiff(c(real_m, naive_b), real_m[1])
+  bind_rows(lapply(others, \(o) {
+    r <- find_test(eval_tests, real_m[1], o)
+    if (is.null(r)) NULL else mutate(r, model_a = real_m[1], model_b = o)
+  })) |>
+    transmute(Comparison    = paste(long_labels[model_a], "vs", long_labels[model_b]),
+              `MAE diff`    = round(mae_diff, 2),
+              `DM p`        = p_tab(dm_p),
+              `GW p`        = p_tab(gw_p),
+              `Hours better / worse` = paste(hours_a_better, "/", hours_b_better)) |>
+    knitr::kable(align = "lrrrr")
+}
+```
+
+:::
+
+
+# Ranges {scrolling="true"}
+
+## Row {height=440px}
+
+::: {.card title="Ranges: how honest are the probabilities?"}
+
+```{r}
+#| output: asis
+tab_attr <- 'class="table table-sm table-striped small"'
+if (has_prob) {
+  tab1 <- prob_m |>
+    arrange(pinball) |>
+    transmute(Method                = paste0(unname(q_methods[method]), ifelse(chosen, " (used)", "")),
+              Pinball               = round(pinball, 2),
+              `Skill vs naive`      = if ("skill" %in% names(prob_m)) pct(skill) else "\u2013",
+              `DM p vs best`        = ifelse(is.na(dm_p), "best", p_tab(dm_p)),
+              `50% range covers`    = sprintf("%s (p %s)", pct(cov50), p_tab(cov50_p)),
+              `90% range covers`    = sprintf("%s (p %s)", pct(cov90), p_tab(cov90_p)),
+              `Width 50% / 90% (€/MWh)` = sprintf("%.1f / %.1f", width50, width90),
+              `Calibration error`   = round(cal_error, 3))
+  cat(knitr::kable(tab1, format = "html", align = "lrrrrrrr", table.attr = tab_attr))
+  cat("\n\n", prob_txt, " ", neg_txt, "\n\n", sep = "")
+  if (!is.null(prob_cal)) {
+    tab2 <- prob_cal |>
+      filter(model == eval_main, tau %in% c(0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95)) |>
+      mutate(tau = paste0(round(100 * tau), "%"), below = pct(below)) |>
+      tidyr::pivot_wider(names_from = tau, values_from = below) |>
+      transmute(`Share of prices below the quantile` = unname(q_methods[method]), across(ends_with("%")))
+    cat(knitr::kable(tab2, format = "html", align = "lrrrrrrr", table.attr = tab_attr))
+  }
+}
+```
+
+:::
+
+
+# Battery value
+
+## Row {height=14%}
+
+::: {.card}
+<div class="kpi" style="--accent: #f97316">
+<div>
+<div class="kpi-label">`r bat_best_label` share of max profit</div>
+<div class="kpi-value">`r bat_share`</div>
+<div class="kpi-sub">perfect foresight = 100%, `r bat_period`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-battery-charging"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #16a34a">
+<div>
+<div class="kpi-label">Extra profit vs naive</div>
+<div class="kpi-value">`r bat_extra`<span class="kpi-unit">€</span></div>
+<div class="kpi-sub">per MW per year</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-cash-coin"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #6b7280">
+<div>
+<div class="kpi-label">Significance</div>
+<div class="kpi-value">`r bat_p`</div>
+<div class="kpi-sub">`r bat_best_label` vs naive, daily profit</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-check2-circle"></i></div>
+</div>
+:::
+
+## Row {height=44%}
+
+```{r}
+#| title: "Cumulative battery profit when planning with each forecast (EUR)"
+if (!has_battery) {
+  cat("Run scripts/11_battery.R to add the battery backtest.")
+} else {
+  p3 <- plot_ly(bat_daily, x = ~date)
+  for (s in intersect(names(long_labels), names(bat_daily))) {
+    p3 <- p3 |>
+      add_lines(y = cumsum(bat_daily[[s]]), name = long_labels[[s]],
+                line = list(color = strat_colors[[s]], width = if (grepl("^naive", s)) 1.5 else 2.5,
+                            dash = if (s == "perfect") "dot" else "solid"),
+                hovertemplate = paste0("%{y:,.0f} €<extra>", long_labels[[s]], "</extra>"))
+  }
+  p3 |> chart_layout() |> layout(legend = list(orientation = "v", x = 1.02, y = 1), margin = list(t = 20))
+}
+```
+
+## Row {height=42%}
+
+```{r}
+#| title: "Profit by strategy"
+if (has_battery) {
+  bat_sum |>
+    transmute(Strategy              = unname(long_labels[strategy]),
+              `EUR per MW per year` = prettyNum(eur_per_mw_year, big.mark = ","),
+              `Share of perfect`    = pct(share_of_perfect),
+              `MAE (€/MWh)`         = ifelse(strategy == "perfect", "", format(round(mae, 1), nsmall = 1))) |>
+    knitr::kable(align = "lrrr")
+}
+```
+
+::: {.card title="How it works"}
+
+Each day a simulated `r bat_desc` plans tomorrow on the forecast and is paid the actual prices, over
+`r bat_period`. Perfect foresight plans on the actual prices.
+
+`r bat_txt`
+
+No fees or battery wear.
+
+:::
+
+# Revenue at risk {scrolling="true"}
+
+## Row {height=130px}
+
+::: {.card}
+<div class="kpi" style="--accent: #6b7280">
+<div>
+<div class="kpi-label">Days below the floor</div>
+<div class="kpi-value">`r risk_hit`</div>
+<div class="kpi-sub">`r risk_hit_sub`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-calendar-x"></i></div>
+</div>
+:::
+
+## Row {height=440px}
+
+```{r}
+#| title: "Battery revenue each day and its 95% floor (€)"
+if (!has_risk) {
+  cat("Run scripts/12_battery_risk.R to add the revenue at risk.")
+} else {
+  rd <- risk_daily |> filter(method == risk_u$method) |> arrange(date)
+  plot_ly(rd, x = ~date) |>
+    add_lines(y = ~realized, name = "Revenue", line = list(color = orange, width = 1.5),
+              hovertemplate = "%{y:,.0f} €<extra>Revenue</extra>") |>
+    add_lines(y = ~floor, name = "95% floor (expected minus VaR)", line = list(color = "#2563eb", width = 1.5),
+              hovertemplate = "%{y:,.0f} €<extra>95% floor</extra>") |>
+    add_markers(data = filter(rd, miss), y = ~realized, name = "Below the floor",
+                marker = list(color = ink, size = 8, line = list(color = "#ffffff", width = 2)),
+                hovertemplate = "%{y:,.0f} €<extra>Below the floor</extra>") |>
+    chart_layout() |>
+    layout(margin = list(t = 20))
+}
+```
+
+## Row {height=250px}
+
+```{r}
+#| title: "Backtest: four ways to build the scenarios"
+if (has_risk) {
+  risk_tests |>
+    transmute(Method                        = paste0(label, ifelse(used, " (used)", "")),
+              `Days below the floor`        = sprintf("%s (%d of %d)", pct(miss_rate), misses, days),
+              `Kupiec p`                    = p_tab(kupiec_p),
+              `Christoffersen p`            = ifelse(is.na(christoffersen_p), "\u2013", p_tab(christoffersen_p)),
+              `Acerbi–Székely p`            = p_tab(z2_p),
+              `FZ0 score`                   = format(round(fz0, 2), nsmall = 2),
+              `DM p vs best`                = ifelse(is.na(dm_p), "best", p_tab(dm_p)),
+              `VaR / ES (€)`                = paste(sapply(var, eur), "/", sapply(es, eur)),
+              `Live misses`                 = ifelse(live_days > 0, sprintf("%d of %d", live_misses, live_days), "\u2013")) |>
+    knitr::kable(align = "lrrrrrrrr")
+}
+```
+
+## Row {height=360px}
+
+::: {.card title="How it works"}
+
+Past days' errors run through the day's plan in four ways: as they were, scaled by last week's volatility, a
+normal distribution, and scaled by an EWMA. Rule set before running: pass Kupiec, Christoffersen and
+Acerbi–Székely at 5%, then the lowest FZ0 score. EWMA was added after the first three failed, so the live days
+are its real test.
+
+`r risk_txt`
+
+No fees or battery wear.
+
+:::

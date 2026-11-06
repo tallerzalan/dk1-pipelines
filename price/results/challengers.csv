@@ -1,0 +1,2 @@
+challenger,label,backtest_days,backtest_mae_champion,backtest_mae_challenger,backtest_diff,backtest_p,live_days,live_mae_champion,live_mae_challenger,live_diff,live_p,live_p_holm,status,start,decision
+ensemble_bc,Bias-corrected,352,17.03589567550505,16.319135890151514,-0.7167597853535355,0.02113006415774753,23,30.546784376811594,26.339538033514494,-4.207246343297101,0.07199972985773521,0.07199972985773521,running,2026-10-14,2027-03-01

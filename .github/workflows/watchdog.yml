@@ -1,0 +1,45 @@
+# checks that the day's forecasts were made. a failed run means github sends an email to the repository owner
+
+name: Watchdog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "45 9 * * *"    # 11:45 summer time, 10:45 winter time
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the forecasts
+        run: |
+          now=$(TZ=Europe/Copenhagen date +%H%M)
+          tomorrow=$(TZ=Europe/Copenhagen date -d tomorrow +%F)
+          fail=0
+          if grep -q ",$tomorrow," price/forecasts/forecasts_live.csv; then
+            echo "price forecast for $tomorrow: ok"
+          else
+            echo "::error::No price forecast for $tomorrow. Run 'Price forecast' by hand before 11:45 danish time."
+            fail=1
+          fi
+          if [ "$now" -ge 1130 ]; then
+            if grep -q ",$tomorrow," imbalance/forecasts/da_imbalance_log.csv; then
+              echo "day-ahead paper positions for $tomorrow: ok"
+            else
+              echo "::error::No day-ahead paper positions for $tomorrow."
+              fail=1
+            fi
+          fi
+          last=$(tail -1 imbalance/forecasts/intraday_log.csv | cut -d, -f1)
+          age=$(( ($(date -u +%s) - $(date -u -d "$last" +%s)) / 60 ))
+          if [ "$age" -le 180 ]; then
+            echo "imbalance forecast made $age minutes ago: ok"
+          else
+            echo "::error::The last imbalance forecast is $age minutes old (made $last UTC)."
+            fail=1
+          fi
+          exit $fail

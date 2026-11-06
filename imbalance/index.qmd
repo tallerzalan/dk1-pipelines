@@ -1,0 +1,370 @@
+---
+title: "DK1 imbalance"
+format:
+  dashboard:
+    theme: [cosmo, theme.scss]
+    embed-resources: true
+    nav-buttons:
+      - text: jacobazu.github.io
+        href: https://jacobazu.github.io/
+      - text: Backtest
+        href: backtest.html
+      - icon: github
+        href: https://github.com/jacobazu/dk1-imbalance-forecasting
+    include-in-header:
+      - text: |
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+      - file: stale.html
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| include: false
+source("R/dashboard_setup.R", local = knitr::knit_global())
+```
+
+# Next hours
+
+## Row {height=14%}
+
+::: {.card}
+<div class="kpi" style="--accent: #f97316">
+<div>
+<div class="kpi-label">Forecast made</div>
+<div class="kpi-value">`r if (has_intra) format(made, "%H:%M") else "–"`</div>
+<div class="kpi-sub">`r if (has_intra) paste(format(made, "%a %d %b"), "· next 4 hours") else "no forecast yet"`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-clock-fill"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: `r if (has_intra) dir_colors[[h1_dir]] else grey`">
+<div>
+<div class="kpi-label">Most likely in the next hour</div>
+<div class="kpi-value">`r if (has_intra) dir_labels[[h1_dir]] else "–"`</div>
+<div class="kpi-sub">`r if (has_intra) sprintf("%s (usually %s at this hour)", pct(h1[[h1_dir]]), pct(ic[[h1_dir]])) else ""`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-arrow-down-up"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #16a34a">
+<div>
+<div class="kpi-label">Expected spread, next hour</div>
+<div class="kpi-value">`r if (has_intra) eur(h1$mean) else "–"`<span class="kpi-unit">€/MWh</span></div>
+<div class="kpi-sub">`r if (has_intra) sprintf("80%% band %s to %s", eur(h1$q10), eur(h1$q90)) else ""`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-currency-euro"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #6b7280">
+<div>
+<div class="kpi-label">Live skill vs benchmark, next hour</div>
+<div class="kpi-value">`r if (has_live) live_skill("0-1h") else "–"`</div>
+<div class="kpi-sub">`r if (has_live) paste("lower log loss, live since", live_from) else "starts after the first forecasts"`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-bullseye"></i></div>
+</div>
+:::
+
+## Row {height=48%}
+
+```{r}
+#| title: "Probability of each direction, per quarter-hour (Danish time)"
+if (has_intra) prob_chart(ie, "") else cat("No intraday forecast yet.")
+```
+
+## Row {height=38%}
+
+```{r}
+#| title: "Imbalance price minus spot price: expected and 80% band (EUR/MWh)"
+if (has_intra) spread_chart(ie, "")
+```
+
+# Tomorrow
+
+## Row {height=14%}
+
+::: {.card}
+<div class="kpi" style="--accent: #f97316">
+<div>
+<div class="kpi-label">Day</div>
+<div class="kpi-value">`r if (has_da) format(da_day, "%a %d %b") else "–"`</div>
+<div class="kpi-sub">`r if (has_da) paste("made", format(dk(de$made_utc[1]), "%a %H:%M"), "· data up to noon") else "after the day-ahead auction"`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-calendar-event-fill"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #2563eb">
+<div>
+<div class="kpi-label">Average probability of down / up</div>
+<div class="kpi-value">`r if (has_da) paste(pct(da_avg$down), "/", pct(da_avg$up)) else "–"`</div>
+<div class="kpi-sub">`r if (has_da) sprintf("down most likely in %d of %d quarters", da_dir_counts[["down"]], nrow(de)) else ""`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-arrow-down-up"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #6b7280">
+<div>
+<div class="kpi-label">Live skill vs benchmark, day-ahead</div>
+<div class="kpi-value">`r if (has_live) live_skill("day-ahead") else "–"`</div>
+<div class="kpi-sub">`r if (has_live) paste("lower log loss, live since", live_from) else "starts after the first forecasts"`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-bullseye"></i></div>
+</div>
+:::
+
+## Row {height=48%}
+
+```{r}
+#| title: "Probability of each direction, per quarter-hour (Danish time)"
+if (has_da) prob_chart(de, "", day = TRUE) else cat("No day-ahead forecast yet.")
+```
+
+## Row {height=38%}
+
+```{r}
+#| title: "Imbalance price minus spot price: expected and 80% band (EUR/MWh)"
+if (has_da) spread_chart(de, "", day = TRUE)
+```
+
+# Last 24 hours
+
+## Row {height=14%}
+
+::: {.card}
+<div class="kpi" style="--accent: #f97316">
+<div>
+<div class="kpi-label">Quarters known</div>
+<div class="kpi-value">`r if (has_recent) nrow(re) else "–"`</div>
+<div class="kpi-sub">`r if (has_recent) paste("last 24 hours, up to", format(dk(last_known), "%a %H:%M")) else "starts once the first quarters are published"`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-calendar-check-fill"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #16a34a">
+<div>
+<div class="kpi-label">Right direction, forecast</div>
+<div class="kpi-value">`r if (has_recent) pct(mean(re$hit)) else "–"`</div>
+<div class="kpi-sub">most likely direction. A forecast that says 50% is right about half the time</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-check2-circle"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #6b7280">
+<div>
+<div class="kpi-label">Right direction, benchmark</div>
+<div class="kpi-value">`r if (has_recent) pct(mean(rc$hit)) else "–"`</div>
+<div class="kpi-sub">most common direction in that hour over the last 28 days</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-bar-chart-fill"></i></div>
+</div>
+:::
+
+## Row {height=48%}
+
+```{r}
+#| title: "Forecast and what happened, per quarter-hour (Danish time). Bars: the newest forecast before the quarter. Squares: what happened"
+if (has_recent) recent_prob_chart(re) else cat("No quarters with both a forecast and a result yet.")
+```
+
+## Row {height=38%}
+
+```{r}
+#| title: "Imbalance price minus spot price: forecast and what happened (EUR/MWh)"
+if (has_recent) recent_spread_chart(re)
+```
+
+# Track record
+
+## Row {height=14%}
+
+::: {.card}
+<div class="kpi" style="--accent: #f97316">
+<div>
+<div class="kpi-label">Quarters scored</div>
+<div class="kpi-value">`r if (has_live) format(nrow(live), big.mark = ",") else 0`</div>
+<div class="kpi-sub">`r if (has_live) paste("live since", live_from) else "starts after the first forecasts"`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-calendar-check-fill"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #16a34a">
+<div>
+<div class="kpi-label">Live skill, next hour</div>
+<div class="kpi-value">`r if (has_live) live_skill("0-1h") else "\u2013"`</div>
+<div class="kpi-sub">lower log loss than the benchmark</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-graph-up-arrow"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #6b7280">
+<div>
+<div class="kpi-label">Live skill, day-ahead</div>
+<div class="kpi-value">`r if (has_live) live_skill("day-ahead") else "\u2013"`</div>
+<div class="kpi-sub">lower log loss than the benchmark</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-calendar-event-fill"></i></div>
+</div>
+:::
+
+## Row {height=86%}
+
+```{r}
+#| title: "Live forecasts: log loss of the ensemble vs the benchmark, per horizon"
+#| output: asis
+if (has_live) {
+  live_tab |>
+    transmute(Horizon = as.character(h), Quarters = quarters, `Since` = format(dk(from), "%d %b"),
+              `Log loss ensemble` = round(ens, 3), `Log loss benchmark` = round(clim, 3),
+              `Live skill` = pct(skill, 1)) |>
+    knitr::kable(align = "lrrrrr") |>
+    cat(sep = "\n")
+} else {
+  cat("The track record starts once the first forecast quarters have passed.")
+}
+cat("\n\nEvery forecast is saved before its quarter starts and never changed, and is scored once the",
+    "imbalance data for that quarter is published. A few days of live data say little: differences of a",
+    "few percent take months to show.\n")
+```
+
+```{r}
+#| title: "Live skill so far (lower log loss than the benchmark, cumulative)"
+if (has_live) {
+  cum <- live |>
+    arrange(time) |>
+    group_by(horizon) |>
+    mutate(skill = 1 - cummean(ll_ens) / cummean(ll_clim), day = as_date(dk(time))) |>
+    group_by(horizon, day) |>
+    summarise(skill = last(skill), n = n(), .groups = "drop") |>
+    mutate(h = factor(horizon_labels[horizon], levels = horizon_labels))
+  h_colors <- setNames(c("#f97316", "#fb923c", "#fdba74", "#fed7aa", "#2563eb"), horizon_labels)
+  plot_ly(cum, x = ~day, y = ~skill, color = ~h, colors = h_colors, type = "scatter",
+          mode = "lines+markers", line = list(width = 2.5), marker = list(size = 7),
+          hovertemplate = "%{y:.1%}") |>
+    chart_layout() |>
+    layout(yaxis = list(tickformat = ".0%", zeroline = TRUE),
+           xaxis = list(type = "date", tickformat = "%d %b", dtick = 86400000))
+} else {
+  cat("No scored forecasts yet.")
+}
+```
+
+# Day-ahead to imbalance
+
+## Row {height=14%}
+
+::: {.card}
+<div class="kpi" style="--accent: #f97316">
+<div>
+<div class="kpi-label">Latest positions</div>
+<div class="kpi-value">`r if (has_da_log) sprintf("%d long · %d short", sum(da_next$position == 1), sum(da_next$position == -1)) else "–"`</div>
+<div class="kpi-sub">`r if (has_da_log) paste("for", format(da_next_day, "%a %d %b"), "· made", format(dk(da_next$made_utc[1]), "%a %H:%M"), "before the auction") else "first positions the next morning before the auction"`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-arrow-left-right"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #16a34a">
+<div>
+<div class="kpi-label">Paper P&L so far</div>
+<div class="kpi-value">`r if (has_da_live) eur0(sum(da_live$ens)) else "–"`</div>
+<div class="kpi-sub">`r if (has_da_live) paste("1 MW after fees, since", format(as_date(min(da_live$date)), "%d %b %Y")) else "starts once the first day is settled"`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-currency-euro"></i></div>
+</div>
+:::
+
+::: {.card}
+<div class="kpi" style="--accent: #6b7280">
+<div>
+<div class="kpi-label">Days in profit</div>
+<div class="kpi-value">`r if (has_da_live) sprintf("%d of %d", sum(da_live$ens > 0), nrow(da_live)) else "–"`</div>
+<div class="kpi-sub">`r if (has_da_live) sprintf("always long %s, always short %s", eur0(sum(da_live$long)), eur0(sum(da_live$short))) else ""`</div>
+</div>
+<div class="kpi-icon"><i class="bi bi-calendar-check-fill"></i></div>
+</div>
+:::
+
+## Row {height=48%}
+
+```{r}
+#| title: "Latest positions: expected spread per quarter-hour, long above the fees and short below (EUR/MWh)"
+if (has_da_log) {
+  pos_col <- c("-1" = "#2563eb", "0" = "#cbd5e1", "1" = "#16a34a")
+  pos_lab <- c("-1" = "Short", "0" = "None", "1" = "Long")
+  p <- plot_ly()
+  for (k in c("1", "-1", "0")) {
+    x <- da_next[as.character(da_next$position) == k, ]
+    if (nrow(x) > 0) p <- p |> add_bars(x = dk(x$time), y = x$expected, name = pos_lab[[k]], marker = list(color = pos_col[[k]]),
+                                        hovertemplate = paste0("%{y:.1f} €/MWh<extra>", pos_lab[[k]], "</extra>"))
+  }
+  p |> chart_layout() |> layout(barmode = "overlay", bargap = 0.15,
+                                xaxis = list(type = "date", tickformat = "%H:%M", dtick = 2 * 3600 * 1000))
+} else cat("No positions yet. They are made every morning between 10:30 and 11:55, before the noon auction.")
+```
+
+## Row {height=38%}
+
+```{r}
+#| title: "Paper P&L since launch, 1 MW after fees"
+if (has_da_live) cum_chart(da_live) else cat("The P&L starts once the first traded day has its imbalance prices.")
+```
+
+::: {.card title="How it works"}
+Paper test, not trading. A day-ahead position without physical power is settled at the imbalance price. Every
+morning before the auction the model goes long where the expected spread is above the fees (0.188 €/MWh) and short
+where it is below minus the fees. The positions are saved before the auction and never changed.
+
+Energinet expects a balance responsible party to aim to be in balance, so doing this on purpose depends on the rules.
+:::
+
+# Method
+
+::: {.card title="How it works"}
+
+**What is forecast.** Each quarter-hour Energinet balances DK1 by activating reserves up or down. The direction
+sets the imbalance price: above spot when the system is short, below when it is long. The models give the chance
+of each direction and the spread between the imbalance price and spot.
+
+**When.** Every hour for the next 4 hours, once a day after the auction for all of tomorrow, and once before the auction for the day-ahead to imbalance positions.
+
+**Inputs.** Calendar, the spot price, wind and solar forecasts made 48 hours ahead and recent imbalances. For the
+next hour also the real-time state of the grid.
+
+**Models.** A multinomial lasso and XGBoost, one per hour ahead, refit weekly. The forecast is their average.
+Benchmark: how often each direction happened in that hour over the last 28 days.
+
+**Spread.** Recent spreads of the same direction with a similar spot price, weighted by the direction probabilities.
+
+**Tests.** Log loss and pinball loss against the benchmark, Diebold-Mariano with Newey-West, a calibration chart
+and the value of picking a side. They are on the [backtest page](backtest.html).
+
+**Data:** [Energi Data Service](https://www.energidataservice.dk) (Energinet), weather by
+[Open-Meteo](https://open-meteo.com).<br>
+**Code:** [github.com/jacobazu/dk1-imbalance-forecasting](https://github.com/jacobazu/dk1-imbalance-forecasting)<br>
+**Last updated:** `r format(with_tz(Sys.time(), "Europe/Copenhagen"), "%d %B %Y, %H:%M")` (Danish time)
+
+:::
+

@@ -1,0 +1,102 @@
+# daily DK1 price forecast, from price/ (upstream's daily.yml without its dashboard and github pages steps)
+
+name: Price forecast
+
+on:
+  schedule:
+    # the gate below only lets a run through between 10:00 and 11:45 danish time, once a day. github drops many
+    # scheduled runs, so there are several attempts across the window in summer and in winter
+    - cron: "5,20,35,50 8 * * *"
+    - cron: "5,20,35,50 9 * * *"
+    - cron: "5,20,35 10 * * *"
+  workflow_dispatch:
+    inputs:
+      scheduled:
+        description: "Same checks as a scheduled run"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: price
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: price
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    outputs:
+      go: ${{ steps.check.outputs.go }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - id: check
+        run: |
+          now=$(TZ=Europe/Copenhagen date +%H%M)
+          target=$(TZ=Europe/Copenhagen date -d tomorrow +%F)
+          if [ "${{ github.event_name == 'schedule' || inputs.scheduled }}" != "true" ]; then go=true
+          elif [ "$now" -lt 1000 ]; then go=false
+          elif [ "$now" -ge 1145 ]; then go=false
+          elif grep -q ",$target," forecasts/forecasts_live.csv; then go=false
+          else go=true; fi
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+          echo "danish time $now, forecast for $target: run = $go"
+
+  forecast:
+    needs: gate
+    if: needs.gate.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: renv
+          use-public-rspm: true
+          working-directory: price
+
+      - uses: r-lib/actions/setup-renv@v2
+        with:
+          working-directory: price
+
+      - name: Update prices, neighbour prices and weather
+        run: Rscript scripts/01_update_live.R
+
+      - name: Forecast tomorrow
+        run: Rscript scripts/05_forecast_tomorrow.R
+
+      - name: Evaluate forecasts and battery
+        continue-on-error: true   # the forecast is saved anyway
+        run: |
+          Rscript scripts/10_evaluate.R
+          Rscript scripts/11_battery.R
+          Rscript scripts/12_battery_risk.R
+
+      - name: Save forecast and results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add forecasts/forecasts_live.csv live/ results/
+          target=$(TZ=Europe/Copenhagen date -d tomorrow +%F)
+          if git diff --cached --quiet -- forecasts/forecasts_live.csv; then
+            msg="Prices updated, forecast for $target was already saved"
+          else
+            msg="Forecast for delivery day $target, made $(date -u '+%F %H:%M') UTC"
+          fi
+          git commit -m "$msg" || echo "Nothing new to commit"
+          for try in 1 2 3; do
+            if git pull --rebase origin main && git push; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            echo "saving failed (try $try), trying again in 20 seconds"
+            sleep 20
+          done
+          exit 1

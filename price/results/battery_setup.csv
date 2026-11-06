@@ -1,0 +1,5 @@
+name,value
+cap_mwh,2
+power_mw,1
+eff_rt,0.9
+max_cycle,1
