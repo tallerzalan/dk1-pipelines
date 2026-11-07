@@ -58,7 +58,7 @@ def get(url, params):
     for _ in range(150):
         try:
             r = requests.get(url, params=params, timeout=300)
-        except requests.ConnectionError:
+        except (requests.ConnectionError, requests.Timeout):
             time.sleep(30)
             continue
         if r.status_code == 429:
