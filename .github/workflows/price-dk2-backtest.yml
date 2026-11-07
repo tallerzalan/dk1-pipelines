@@ -39,6 +39,7 @@ jobs:
 
       - name: Download history
         run: |
+          mkdir -p data/raw data/processed figures plots charts
           Rscript scripts/01_download.R
           Rscript scripts/02_clean.R
           Rscript scripts/07_download_exog.R

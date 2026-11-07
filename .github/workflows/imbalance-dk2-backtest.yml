@@ -35,6 +35,7 @@ jobs:
 
       - name: Download history
         run: |
+          mkdir -p data/raw data/processed
           Rscript scripts/01_download.R
           Rscript scripts/01b_download_realtime.R
 
