@@ -1,0 +1,226 @@
+# every pipeline, for every zone, from one trigger. the first job works out what is due, and only that runs, in parallel,
+# so a slow job can't hold up another. started every half hour by an outside scheduler, because github drops many of its own
+
+name: Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run this whatever the time. The price forecast still won't save after the noon auction"
+        type: choice
+        options: [auto, price, imbalance, paper, all]
+        default: auto
+
+permissions:
+  contents: write
+
+jobs:
+  due:
+    runs-on: ubuntu-24.04
+    outputs:
+      price: ${{ steps.check.outputs.price }}
+      imbalance: ${{ steps.check.outputs.imbalance }}
+      paper: ${{ steps.check.outputs.paper }}
+      watchdog: ${{ steps.check.outputs.watchdog }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - id: check
+        run: |
+          now=$(TZ=Europe/Copenhagen date +%H%M)
+          tomorrow=$(TZ=Europe/Copenhagen date -d tomorrow +%F)
+          issue=$(date -u +%Y-%m-%dT%H:00:00Z)
+          force="${{ inputs.force }}"
+          forced() { [ "$force" = "$1" ] || [ "$force" = "all" ]; }
+
+          # the forecast has to be saved before the noon auction, a run takes about 5 minutes, one a day
+          price=()
+          for f in price price-dk2; do
+            if forced price; then price+=("$f")
+            elif [ "$now" -ge 1000 ] && [ "$now" -lt 1145 ] && ! grep -q ",$tomorrow," "$f/forecasts/forecasts_live.csv"; then price+=("$f"); fi
+          done
+
+          # every hour, unless that hour is already saved. a zone without its backtest can't run yet
+          imbalance=()
+          for f in imbalance imbalance-dk2; do
+            log="$f/forecasts/intraday_log.csv"
+            if forced imbalance; then imbalance+=("$f")
+            elif [ -f "$f/results/direction_scores.csv" ] && ! { [ -f "$log" ] && grep -q ",$issue," "$log"; }; then imbalance+=("$f"); fi
+          done
+
+          # positions between 10:30 and 11:55, after the price forecast. late in the afternoon it scores the settled days
+          paper=()
+          for f in imbalance imbalance-dk2; do
+            log="$f/forecasts/da_imbalance_log.csv"
+            if forced paper; then paper+=("$f")
+            elif [ "$now" -ge 1030 ] && [ "$now" -lt 1155 ] && ! { [ -f "$log" ] && grep -q ",$tomorrow," "$log"; }; then paper+=("$f")
+            elif [ "$now" -ge 1600 ] && [ "$now" -lt 1630 ]; then paper+=("$f"); fi
+          done
+
+          json() { if [ $# -eq 0 ]; then echo '[]'; else printf '%s\n' "$@" | jq -R . | jq -cs .; fi; }
+          echo "price=$(json "${price[@]}")" >> "$GITHUB_OUTPUT"
+          echo "imbalance=$(json "${imbalance[@]}")" >> "$GITHUB_OUTPUT"
+          echo "paper=$(json "${paper[@]}")" >> "$GITHUB_OUTPUT"
+          watchdog=false
+          if [ "$now" -ge 1130 ] && [ "$now" -lt 1200 ]; then watchdog=true; fi
+          echo "watchdog=$watchdog" >> "$GITHUB_OUTPUT"
+          echo "danish time $now, tomorrow $tomorrow, hour $issue"
+          cat "$GITHUB_OUTPUT"
+
+  price:
+    needs: due
+    if: needs.due.outputs.price != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        folder: ${{ fromJson(needs.due.outputs.price) }}
+    concurrency:
+      group: ${{ matrix.folder == 'price' && 'price' || 'price-dk2' }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.folder }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: ./.github/actions/setup-r
+        with:
+          folder: ${{ matrix.folder }}
+      - run: Rscript scripts/01_update_live.R
+      - run: Rscript scripts/05_forecast_tomorrow.R
+      - name: Evaluate forecasts and battery
+        continue-on-error: true   # the forecast is saved anyway
+        run: |
+          Rscript scripts/10_evaluate.R
+          Rscript scripts/11_battery.R
+          Rscript scripts/12_battery_risk.R
+      - uses: ./.github/actions/save
+        with:
+          folder: ${{ matrix.folder }}
+          paths: forecasts/forecasts_live.csv live/ results/
+          message: Forecast ${{ matrix.folder }}
+
+  imbalance:
+    needs: due
+    if: needs.due.outputs.imbalance != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      LANG: C.UTF-8
+    strategy:
+      fail-fast: false
+      matrix:
+        folder: ${{ fromJson(needs.due.outputs.imbalance) }}
+    concurrency:
+      group: ${{ matrix.folder == 'imbalance' && 'imbalance-live' || 'imbalance-live-dk2' }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.folder }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: ./.github/actions/setup-r
+        with:
+          folder: ${{ matrix.folder }}
+      # the fitted models live in the actions cache. if the cache is gone they are fitted again
+      - uses: actions/cache/restore@v6
+        with:
+          path: ${{ matrix.folder }}/models
+          key: ${{ matrix.folder == 'imbalance' && 'models-' || 'dk2-models-' }}${{ github.run_id }}
+          restore-keys: ${{ matrix.folder == 'imbalance' && 'models-' || 'dk2-models-' }}
+      - name: Forecast and score
+        id: live
+        run: |
+          before=$(sha256sum models/models.rds 2>/dev/null || true)
+          set -o pipefail
+          if ! Rscript scripts/07_live.R 2>&1 | tee live.log; then
+            echo "::error title=07_live.R::$(grep -E -B2 -A3 '^Error|Execution halted' live.log | head -c 900 | tr '\n%' ' p')"
+            exit 1
+          fi
+          rm -f live.log
+          if [ "$before" != "$(sha256sum models/models.rds)" ]; then echo "refit=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.live.outputs.refit == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ matrix.folder }}/models
+          key: ${{ matrix.folder == 'imbalance' && 'models-' || 'dk2-models-' }}${{ github.run_id }}
+      - uses: ./.github/actions/save
+        with:
+          folder: ${{ matrix.folder }}
+          paths: forecasts results live
+          message: Forecasts ${{ matrix.folder }}
+
+  paper:
+    needs: due
+    if: needs.due.outputs.paper != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      LANG: C.UTF-8
+      PRICE_REPO: https://raw.githubusercontent.com/${{ github.repository }}/main/${{ matrix.folder == 'imbalance' && 'price' || 'price-dk2' }}/
+    strategy:
+      fail-fast: false
+      matrix:
+        folder: ${{ fromJson(needs.due.outputs.paper) }}
+    concurrency:
+      group: ${{ matrix.folder == 'imbalance' && 'imbalance-da' || 'imbalance-da-dk2' }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.folder }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: ./.github/actions/setup-r
+        with:
+          folder: ${{ matrix.folder }}
+      - uses: actions/cache/restore@v6
+        with:
+          path: ${{ matrix.folder }}/models
+          key: ${{ matrix.folder == 'imbalance' && 'da-models-' || 'dk2-da-models-' }}${{ github.run_id }}
+          restore-keys: ${{ matrix.folder == 'imbalance' && 'da-models-' || 'dk2-da-models-' }}
+      - name: Positions and P&L
+        id: run
+        run: |
+          before=$(sha256sum models/da_models.rds 2>/dev/null || true)
+          Rscript scripts/08_da_imbalance.R
+          if [ "$before" != "$(sha256sum models/da_models.rds)" ]; then echo "refit=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.run.outputs.refit == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ matrix.folder }}/models
+          key: ${{ matrix.folder == 'imbalance' && 'da-models-' || 'dk2-da-models-' }}${{ github.run_id }}
+      - uses: ./.github/actions/save
+        with:
+          folder: ${{ matrix.folder }}
+          paths: forecasts results live
+          message: Paper test ${{ matrix.folder }}
+
+  # a failed run means github emails the repository owner
+  watchdog:
+    needs: [due, price, paper]
+    if: ${{ always() && needs.due.outputs.watchdog == 'true' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Check every zone's forecasts
+        run: |
+          tomorrow=$(TZ=Europe/Copenhagen date -d tomorrow +%F)
+          fail=0
+          for f in price price-dk2; do
+            grep -q ",$tomorrow," "$f/forecasts/forecasts_live.csv" && echo "$f for $tomorrow: ok" || { echo "::error::$f: no forecast for $tomorrow."; fail=1; }
+          done
+          for f in imbalance imbalance-dk2; do
+            grep -q ",$tomorrow," "$f/forecasts/da_imbalance_log.csv" && echo "$f paper positions: ok" || { echo "::error::$f: no paper positions for $tomorrow."; fail=1; }
+            last=$(tail -1 "$f/forecasts/intraday_log.csv" | cut -d, -f1)
+            age=$(( ($(date -u +%s) - $(date -u -d "$last" +%s)) / 60 ))
+            if [ "$age" -le 180 ]; then echo "$f hourly forecast $age minutes old: ok"; else echo "::error::$f: the last hourly forecast is $age minutes old."; fail=1; fi
+          done
+          exit $fail

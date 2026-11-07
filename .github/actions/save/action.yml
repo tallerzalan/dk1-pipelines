@@ -1,0 +1,26 @@
+name: Save results
+description: Commit a folder's results. A glitch at GitHub or another job's push can reject it, so it tries three times
+inputs:
+  folder:
+    required: true
+  paths:
+    required: true
+  message:
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ inputs.folder }}
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add ${{ inputs.paths }}
+        git commit -m "${{ inputs.message }} $(date -u '+%F %H:%M') UTC" || echo "Nothing new to commit"
+        for try in 1 2 3; do
+          if git pull --rebase origin main && git push; then exit 0; fi
+          git rebase --abort 2>/dev/null || true
+          echo "saving failed (try $try), trying again in 20 seconds"
+          sleep 20
+        done
+        exit 1

@@ -1,0 +1,16 @@
+name: Set up R
+description: R and the packages from a folder's renv.lock
+inputs:
+  folder:
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: r-lib/actions/setup-r@v2
+      with:
+        r-version: renv
+        use-public-rspm: true
+        working-directory: ${{ inputs.folder }}
+    - uses: r-lib/actions/setup-renv@v2
+      with:
+        working-directory: ${{ inputs.folder }}
