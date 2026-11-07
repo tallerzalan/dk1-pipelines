@@ -30,7 +30,15 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: pytest -q
+      # downloads kept between runs, so a rerun only does the backtest
+      - uses: actions/cache@v4
+        with:
+          path: python/data
+          key: dkfc-data-${{ inputs.zone }}-${{ github.run_id }}
+          restore-keys: dkfc-data-${{ inputs.zone }}-
       - name: Backtest and compare
+        env:
+          PYTHONUNBUFFERED: "1"
         id: parity
         run: |
           reference=../price/results/backtest_forecasts.csv

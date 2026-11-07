@@ -1,5 +1,6 @@
 """python -m dkfc parity --zone DK1 --reference ../price/results/backtest_forecasts.csv --out results/parity_DK1"""
 import argparse
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -19,8 +20,20 @@ def main() -> int:
     parser.add_argument("--cache", type=Path, default=Path("data"))
     args = parser.parse_args()
 
+    began = time.perf_counter()
+    stage = lambda name: print(f"[{(time.perf_counter() - began) / 60:5.1f} min] {name}", flush=True)
     market = MarketData(ZONES[args.zone], args.cache)
-    features = Features(market.prices(), market.neighbours(), market.weather(), market.weather_germany())
+    stage("prices")
+    prices = market.prices()
+    stage("neighbour prices")
+    neighbours = market.neighbours()
+    stage("weather")
+    local_weather = market.weather()
+    stage("german weather")
+    german_weather = market.weather_germany()
+    stage("features")
+    features = Features(prices, neighbours, local_weather, german_weather)
+    stage("backtest")
     reference = pd.read_csv(args.reference, parse_dates=["date"])
     ours = run_backtest(features, str(reference["date"].min().date()), str(reference["date"].max().date()))
     args.out.mkdir(parents=True, exist_ok=True)

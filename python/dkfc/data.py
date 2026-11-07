@@ -22,8 +22,10 @@ def get_json(url: str, params: dict, tries: int = 8) -> dict:
             if response.status_code != 429 and response.status_code < 500:
                 response.raise_for_status()
                 return response.json()
-        except (requests.ConnectionError, requests.Timeout):
-            pass
+        except (requests.ConnectionError, requests.Timeout) as err:
+            print(f"  {url}: {type(err).__name__}, try {attempt + 1}", flush=True)
+        else:
+            print(f"  {url}: status {response.status_code}, try {attempt + 1}", flush=True)
         time.sleep(min(15 * 2 ** attempt, 240))
     raise RuntimeError(f"no answer from {url} after {tries} tries")
 
@@ -53,6 +55,7 @@ def site_weather(site: Site, start: str, end: str) -> pd.Series:
         hourly = get_json(PREVIOUS_RUNS, {"latitude": site.lat, "longitude": site.lon, "hourly": variable, "timezone": "GMT",
                                           "start_date": f"{first:%Y-%m-%d}", "end_date": f"{last:%Y-%m-%d}"})["hourly"]
         parts.append(pd.Series(hourly[variable], index=pd.to_datetime(hourly["time"], utc=True), dtype=float))
+        print(f"  weather {site.name} {first:%Y-%m}", flush=True)
         time.sleep(0.5)
     return pd.concat(parts).rename(f"{site.kind}_{site.name}").sort_index()
 
