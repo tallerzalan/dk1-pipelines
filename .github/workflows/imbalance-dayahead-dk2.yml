@@ -1,0 +1,83 @@
+# dk2 day-ahead to imbalance paper test, from imbalance-dk2/. starts when the dk1 run finishes. simulated positions only: nothing is traded.
+# the script checks the time itself, so extra runs only score
+
+name: Imbalance day-ahead paper test DK2
+
+on:
+  workflow_run:
+    workflows: ["Imbalance day-ahead paper test"]
+    types: [completed]
+  schedule:
+    - cron: "15,45 9 * * *"
+    - cron: "15,45 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: imbalance-da-dk2
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: imbalance-dk2
+
+jobs:
+  trade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      LANG: C.UTF-8
+      # the price forecast made in this repository, not upstream's
+      PRICE_REPO: https://raw.githubusercontent.com/${{ github.repository }}/main/price-dk2/
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: renv
+          use-public-rspm: true
+          working-directory: imbalance-dk2
+
+      - uses: r-lib/actions/setup-renv@v2
+        with:
+          working-directory: imbalance-dk2
+
+      - name: Restore models
+        uses: actions/cache/restore@v6
+        with:
+          path: imbalance-dk2/models
+          key: dk2-da-models-${{ github.run_id }}
+          restore-keys: dk2-da-models-
+
+      - name: Positions and P&L
+        id: run
+        run: |
+          before=$(sha256sum models/da_models.rds 2>/dev/null || true)
+          Rscript scripts/08_da_imbalance.R
+          after=$(sha256sum models/da_models.rds)
+          if [ "$before" != "$after" ]; then echo "refit=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Save models
+        if: steps.run.outputs.refit == 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: imbalance-dk2/models
+          key: dk2-da-models-${{ github.run_id }}
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add forecasts results live
+          git commit -m "DK2 day-ahead to imbalance $(date -u '+%F %H:%M') UTC" || echo "Nothing new to commit"
+          for try in 1 2 3; do
+            if git pull --rebase origin main && git push; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            echo "saving failed (try $try), trying again in 20 seconds"
+            sleep 20
+          done
+          exit 1

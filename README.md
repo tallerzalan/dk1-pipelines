@@ -36,3 +36,6 @@ public-sector data". Not covered by the MIT License or endorsed by Energinet. We
 
 `price-dk2/` is a copy of `price/` for DK2 (eastern Denmark). Only the DK2-specific lines differ: the area, the neighbouring prices (DK1 instead of DK2) and the weather sites (Kriegers Flak, Rodsand, Lolland, Falster and Zealand). XGBoost settings are DK1's and aren't tuned on DK2. The method is the original author's, applied to DK2 by this repository, and isn't the author's own work on DK2.
 
+
+`imbalance-dk2/` is a copy of `imbalance/` with the same kind of change: the area, DK2's weather sites and aFRR, and DK2's own cross-border links (Germany, Sweden and DK1) in the next-hour model. Wind and solar errors stay national, as in the original.
+
