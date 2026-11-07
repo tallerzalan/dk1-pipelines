@@ -1,0 +1,74 @@
+# one-off: the dk1 wind and solar study's protocol applied to dk2, from renewables-dk2/. start by hand.
+# additions are tried on 2025 only, and the final model is run once on 2026. two jobs, because the weather download alone
+# takes hours under open-meteo's limits and a job can run for six at most
+
+name: Renewables DK2 study
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: renewables-dk2
+
+jobs:
+  download:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Download production and weather
+        run: |
+          python get_data.py
+          python get_weather.py
+          python get_weather_models.py
+          python get_weather_runs.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renewables-dk2-data
+          path: renewables-dk2/data
+          retention-days: 7
+
+  study:
+    needs: download
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: renewables-dk2-data
+          path: renewables-dk2/data
+      - name: Run the protocol
+        run: |
+          python backtest.py
+          python improve.py | tee results/improve_log.txt
+          python improve.py final | tee results/final_log.txt
+          python solar.py | tee results/solar_log.txt
+      - name: Save the results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results
+          git commit -m "DK2 renewables study $(date -u '+%F %H:%M') UTC" || echo "Nothing new to commit"
+          for try in 1 2 3; do
+            if git pull --rebase origin main && git push; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            sleep 20
+          done
+          exit 1

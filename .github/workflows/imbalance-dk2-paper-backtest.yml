@@ -35,7 +35,9 @@ jobs:
           working-directory: imbalance-dk2
 
       - name: Download history
-        run: Rscript scripts/01_download.R
+        run: |
+          mkdir -p data/raw data/processed
+          Rscript scripts/01_download.R
 
       - name: Backtest
         run: Rscript scripts/06_dayahead_to_imbalance.R

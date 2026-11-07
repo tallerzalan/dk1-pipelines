@@ -1,0 +1,6 @@
+duckdb
+lightgbm
+matplotlib
+pandas
+requests
+statsmodels
