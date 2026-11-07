@@ -1,10 +1,14 @@
-# one-off: the dk1 wind and solar study's protocol applied to dk2, from renewables-dk2/. start by hand.
-# additions are tried on 2025 only, and the final model is run once on 2026. two jobs, because the weather download alone
-# takes hours under open-meteo's limits and a job can run for six at most
+# the dk1 wind and solar study's protocol applied to dk2, from renewables-dk2/. additions are tried on 2025 only and the
+# final model is run once on 2026.
+# open-meteo allows 10,000 calls a day and ecmwf's old runs alone need about 8,600, so the download can take more than a
+# day. the database is kept in the actions cache after every run, also one that is cut off, and each run carries on from
+# there. the study starts once the download is complete, and never runs twice
 
 name: Renewables DK2 study
 
 on:
+  schedule:
+    - cron: "15 1 * * *"
   workflow_dispatch:
 
 permissions:
@@ -14,32 +18,67 @@ defaults:
   run:
     working-directory: renewables-dk2
 
+env:
+  PYTHONUNBUFFERED: "1"
+
 jobs:
   download:
     runs-on: ubuntu-24.04
     timeout-minutes: 350
+    outputs:
+      complete: ${{ steps.check.outputs.complete }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: main
+      - id: done
+        run: if [ -f results/final_scores.csv ]; then echo "done=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/setup-python@v6
+        if: steps.done.outputs.done != 'true'
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
+      - if: steps.done.outputs.done != 'true'
+        run: pip install -r requirements.txt
+      - uses: actions/cache/restore@v6
+        if: steps.done.outputs.done != 'true'
+        with:
+          path: renewables-dk2/data
+          key: renewables-dk2-db-${{ github.run_id }}
+          restore-keys: renewables-dk2-db-
       - name: Download production and weather
+        if: steps.done.outputs.done != 'true'
+        continue-on-error: true   # cut off by the time limit or open-meteo's daily limit: what is saved is kept
         run: |
           python get_data.py
           python get_weather.py
           python get_weather_models.py
-          python get_weather_runs.py
-      - uses: actions/upload-artifact@v4
+          timeout 300m python get_weather_runs.py
+      - uses: actions/cache/save@v6
+        if: always() && steps.done.outputs.done != 'true'
         with:
-          name: renewables-dk2-data
           path: renewables-dk2/data
-          retention-days: 7
+          key: renewables-dk2-db-${{ github.run_id }}
+      - id: check
+        if: steps.done.outputs.done != 'true'
+        run: |
+          python - <<'EOF'
+          import os
+          import duckdb
+          import pandas as pd
+          from db import TODAY
+          con = duckdb.connect("data/dk1.duckdb", read_only=True)
+          have = con.execute("SELECT count(DISTINCT run) FROM weather_runs").fetchone()[0]
+          want = len(pd.date_range("2024-03-14", TODAY, freq="D"))
+          skipped = open("data/skipped.txt").read().count("weather_runs") if os.path.exists("data/skipped.txt") else 0
+          complete = have + skipped >= want
+          print(f"ecmwf runs saved {have}, skipped {skipped}, needed {want}: complete = {complete}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"complete={str(complete).lower()}\n")
+          EOF
 
   study:
     needs: download
+    if: needs.download.outputs.complete == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
@@ -50,25 +89,19 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - uses: actions/download-artifact@v4
+      - uses: actions/cache/restore@v6
         with:
-          name: renewables-dk2-data
           path: renewables-dk2/data
+          key: renewables-dk2-db-${{ github.run_id }}
+          restore-keys: renewables-dk2-db-
       - name: Run the protocol
         run: |
           python backtest.py
           python improve.py | tee results/improve_log.txt
           python improve.py final | tee results/final_log.txt
           python solar.py | tee results/solar_log.txt
-      - name: Save the results
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add results
-          git commit -m "DK2 renewables study $(date -u '+%F %H:%M') UTC" || echo "Nothing new to commit"
-          for try in 1 2 3; do
-            if git pull --rebase origin main && git push; then exit 0; fi
-            git rebase --abort 2>/dev/null || true
-            sleep 20
-          done
-          exit 1
+      - uses: ./.github/actions/save
+        with:
+          folder: renewables-dk2
+          paths: results
+          message: DK2 renewables study
