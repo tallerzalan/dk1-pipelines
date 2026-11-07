@@ -1,0 +1,51 @@
+# one-off check: reruns a zone's price backtest in python and compares it with the r forecasts. changes nothing live
+
+name: Python parity
+
+on:
+  workflow_dispatch:
+    inputs:
+      zone:
+        type: choice
+        options: [DK1, DK2]
+        default: DK1
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: python
+
+jobs:
+  parity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+      - name: Backtest and compare
+        id: parity
+        run: |
+          reference=../price/results/backtest_forecasts.csv
+          if [ "${{ inputs.zone }}" = "DK2" ]; then reference=../price-dk2/results/backtest_forecasts.csv; fi
+          python -m dkfc parity --zone ${{ inputs.zone }} --reference "$reference" --out results/parity_${{ inputs.zone }}
+      - name: Save the comparison
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results
+          git commit -m "Python parity ${{ inputs.zone }} $(date -u '+%F %H:%M') UTC" || echo "Nothing new to commit"
+          for try in 1 2 3; do
+            if git pull --rebase origin main && git push; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            sleep 20
+          done
+          exit 1

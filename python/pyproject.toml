@@ -1,0 +1,16 @@
+[project]
+name = "dkfc"
+version = "0.1.0"
+description = "DK1 and DK2 day-ahead price forecasts: a Python rewrite of jacobazu/dk1-price-forecasting (MIT)"
+requires-python = ">=3.12"
+dependencies = ["joblib", "numpy", "pandas", "pyarrow", "requests", "scikit-learn", "scipy", "xgboost"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["dkfc"]
