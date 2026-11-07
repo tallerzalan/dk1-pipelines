@@ -1,0 +1,8 @@
+group,input,source,published,before_auction,status
+prices,"DK1 prices from D-1, D-2, D-3 and D-7",Energi Data Service,the day before each day at about 13:00,yes,used
+nb,"Neighbour prices from D-1 (DE, DK2, NO2, SE3, SE4)",Energi Data Service,D-2 at about 13:00,yes,used
+hol,Danish holidays,calendar,known in advance,yes,used
+wx,"Weather forecast for DK1 (wind at 100 m, solar radiation), made 48 hours ahead",Open-Meteo,48 hours before each hour,yes,used
+wxde,"Weather forecast for Germany (wind at 100 m, solar radiation), made 48 hours ahead",Open-Meteo,48 hours before each hour,yes,used
+,Energinet wind and solar forecasts,Energi Data Service,after the auction,no,dropped: published too late
+,ENTSO-E load forecasts for DK1 and Germany,ENTSO-E,D-1 by 10:00,yes,"dropped: no gain, p = 0.71"

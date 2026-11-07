@@ -1,0 +1,82 @@
+# one-off: downloads dk2's history, runs the backtest and saves the files the daily run needs. start by hand
+
+name: Price DK2 backtest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: price-dk2
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: price-dk2
+
+jobs:
+  backtest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    env:
+      LANG: C.UTF-8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: renv
+          use-public-rspm: true
+          working-directory: price-dk2
+
+      - uses: r-lib/actions/setup-renv@v2
+        with:
+          working-directory: price-dk2
+
+      - name: Download history
+        run: |
+          Rscript scripts/01_download.R
+          Rscript scripts/02_clean.R
+          Rscript scripts/07_download_exog.R
+          Rscript scripts/07b_download_weather.R
+
+      - name: Backtest
+        run: Rscript scripts/13_dk2_backtest.R
+
+      - name: Save the backtest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results live forecasts
+          git commit -m "DK2 price backtest $(date -u '+%F %H:%M') UTC" || echo "Nothing new to commit"
+          for try in 1 2 3; do
+            if git pull --rebase origin main && git push; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            sleep 20
+          done
+          exit 1
+
+      - name: Update the live files
+        run: Rscript scripts/01_update_live.R
+
+      - name: Evaluate
+        continue-on-error: true   # some steps need a first live forecast
+        run: |
+          Rscript scripts/10_evaluate.R
+          Rscript scripts/11_battery.R
+          Rscript scripts/12_battery_risk.R
+
+      - name: Save the results
+        run: |
+          git add results live forecasts
+          git commit -m "DK2 price results $(date -u '+%F %H:%M') UTC" || echo "Nothing new to commit"
+          for try in 1 2 3; do
+            if git pull --rebase origin main && git push; then exit 0; fi
+            git rebase --abort 2>/dev/null || true
+            sleep 20
+          done
+          exit 1

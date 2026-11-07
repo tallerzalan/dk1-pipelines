@@ -1,0 +1,54 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage[scaled=0.9]{helvet}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{microtype}
+\usepackage{booktabs,tabularx,array}
+\usepackage[authoryear,round]{natbib}
+\usepackage{xcolor}
+\usepackage[colorlinks,linkcolor=black,citecolor=black,urlcolor={blue!60!black}]{hyperref}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+\setlength{\bibsep}{0.2em}
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\pagestyle{empty}
+\begin{document}
+{\sffamily\bfseries\Large DK1 day-ahead prices: methods}\par
+\href{https://github.com/jacobazu/dk1-price-forecasting}{github.com/jacobazu/dk1-price-forecasting} \textperiodcentered{} October 2026
+
+Forecasts of tomorrow's 24 hourly prices in DK1, made every morning before the noon auction and scored once the prices are out.
+
+\begin{center}\small
+\begin{tabularx}{\linewidth}{@{}lL@{}}
+\toprule
+Inputs & DK1 prices of D$-$1, D$-$2, D$-$3 and D$-$7, neighbour prices of D$-$1, Danish holidays, and weather forecasts for DK1 and Germany made 48 hours ahead. All published before the auction (\texttt{inputs.csv}). \\
+Models & BMT-X \citep{kapetanios2026}, LEAR-X \citep{lago2021}, XGBoost-X \citep{chen2016} and their average, refitted daily on two years, on asinh-transformed prices \citep{uniejewski2018}. Benchmark: the weekly naive. \\
+Scoring & MAE and rMAE; Diebold--Mariano tests with a Newey--West variance \citep{diebold1995,newey1987}; Giacomini--White \citep{giacomini2006}; model confidence set \citep{hansen2011}; Mincer--Zarnowitz \citep{mincer1969}. \\
+Ranges & Quantiles of past errors with adaptive conformal inference \citep{gibbs2021}; pinball loss, coverage tests, and the Brier score for negative prices. \\
+Battery & A 2\,MWh battery planned on the forecast with a mixed-integer linear program; revenue at risk by EWMA-filtered historical simulation \citep{hull1998}, tested with \citet{kupiec1995}, \citet{christoffersen1998} and \citet{acerbi2014}, and compared with the FZ0 loss \citep{patton2019}. \\
+Rules & Only data published before the auction, and the backtest uses the same inputs. Test rules are written before the test. Changes found in the backtest run live as challengers first. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{thebibliography}{99}\small
+\bibitem[Acerbi and Sz\'ekely(2014)]{acerbi2014} Acerbi, C. and Sz\'ekely, B. (2014). Backtesting expected shortfall. MSCI.
+\bibitem[Chen and Guestrin(2016)]{chen2016} Chen, T. and Guestrin, C. (2016). XGBoost: A scalable tree boosting system. \textit{KDD}.
+\bibitem[Christoffersen(1998)]{christoffersen1998} Christoffersen, P. F. (1998). Evaluating interval forecasts. \textit{International Economic Review}.
+\bibitem[Diebold and Mariano(1995)]{diebold1995} Diebold, F. X. and Mariano, R. S. (1995). Comparing predictive accuracy. \textit{Journal of Business \& Economic Statistics}.
+\bibitem[Giacomini and White(2006)]{giacomini2006} Giacomini, R. and White, H. (2006). Tests of conditional predictive ability. \textit{Econometrica}.
+\bibitem[Gibbs and Cand\`es(2021)]{gibbs2021} Gibbs, I. and Cand\`es, E. (2021). Adaptive conformal inference under distribution shift. \textit{NeurIPS}.
+\bibitem[Hansen et~al.(2011)]{hansen2011} Hansen, P. R., Lunde, A. and Nason, J. M. (2011). The model confidence set. \textit{Econometrica}.
+\bibitem[Hull and White(1998)]{hull1998} Hull, J. and White, A. (1998). Incorporating volatility updating into the historical simulation method for value-at-risk. \textit{Journal of Risk}.
+\bibitem[Kapetanios et~al.(2026)]{kapetanios2026} Kapetanios, G., Sarafidis, V. and Ventouri, A. (2026). Model selection in high-dimensional linear regression using boosting with multiple testing. arXiv.
+\bibitem[Kupiec(1995)]{kupiec1995} Kupiec, P. (1995). Techniques for verifying the accuracy of risk measurement models. \textit{Journal of Derivatives}.
+\bibitem[Lago et~al.(2021)]{lago2021} Lago, J., Marcjasz, G., De Schutter, B. and Weron, R. (2021). Forecasting day-ahead electricity prices: A review of state-of-the-art algorithms, best practices and an open-access benchmark. \textit{Applied Energy}.
+\bibitem[Mincer and Zarnowitz(1969)]{mincer1969} Mincer, J. A. and Zarnowitz, V. (1969). The evaluation of economic forecasts. NBER.
+\bibitem[Newey and West(1987)]{newey1987} Newey, W. K. and West, K. D. (1987). A simple, positive semi-definite, heteroskedasticity and autocorrelation consistent covariance matrix. \textit{Econometrica}.
+\bibitem[Patton et~al.(2019)]{patton2019} Patton, A. J., Ziegel, J. F. and Chen, R. (2019). Dynamic semiparametric models for expected shortfall (and value-at-risk). \textit{Journal of Econometrics}.
+\bibitem[Uniejewski et~al.(2018)]{uniejewski2018} Uniejewski, B., Weron, R. and Ziel, F. (2018). Variance stabilizing transformations for electricity spot price forecasting. \textit{IEEE Transactions on Power Systems}.
+\end{thebibliography}
+\end{document}

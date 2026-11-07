@@ -31,3 +31,8 @@ Code: MIT, see the `LICENSE` in each folder. Not trading advice.
 Data from [Energi Data Service](https://www.energidataservice.dk) (Energinet), used under "Conditions for use of Danish
 public-sector data". Not covered by the MIT License or endorsed by Energinet. Weather from
 [Open-Meteo.com](https://open-meteo.com), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+## DK2
+
+`price-dk2/` is a copy of `price/` for DK2 (eastern Denmark). Only the DK2-specific lines differ: the area, the neighbouring prices (DK1 instead of DK2) and the weather sites (Kriegers Flak, Rodsand, Lolland, Falster and Zealand). XGBoost settings are DK1's and aren't tuned on DK2. The method is the original author's, applied to DK2 by this repository, and isn't the author's own work on DK2.
+
