@@ -30,12 +30,28 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: pytest -q
-      # downloads kept between runs, so a rerun only does the backtest
-      - uses: actions/cache@v4
+      # downloads kept between runs, also when a run fails, so a rerun only does what is missing
+      - uses: actions/cache/restore@v4
         with:
           path: python/data
           key: dkfc-data-${{ inputs.zone }}-${{ github.run_id }}
           restore-keys: dkfc-data-${{ inputs.zone }}-
+      - name: Download
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          python - <<'EOF'
+          from pathlib import Path
+          from dkfc.data import MarketData
+          from dkfc.zones import ZONES
+          m = MarketData(ZONES["${{ inputs.zone }}"], Path("data"))
+          m.prices(); m.neighbours(); m.weather(); m.weather_germany()
+          EOF
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: python/data
+          key: dkfc-data-${{ inputs.zone }}-${{ github.run_id }}
       - name: Backtest and compare
         env:
           PYTHONUNBUFFERED: "1"

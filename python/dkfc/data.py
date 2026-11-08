@@ -80,12 +80,15 @@ class MarketData:
         frame.to_parquet(path)
         return frame
 
+    # the models train on two years before each day, and the backtest starts on 1 oct 2025
+    HISTORY_FROM = "2023-06-01"
+
     def prices(self) -> pd.Series:
-        return self._cached("prices", lambda: area_prices(self.zone.code, "2019-01-01", self.end).to_frame("price"))["price"]
+        return self._cached("prices", lambda: area_prices(self.zone.code, self.HISTORY_FROM, self.end).to_frame("price"))["price"]
 
     def neighbours(self) -> pd.DataFrame:
         return self._cached("neighbours", lambda: pd.concat(
-            {a: area_prices(a, "2019-01-01", self.end) for a in self.zone.neighbours}, axis=1))
+            {a: area_prices(a, self.HISTORY_FROM, self.end) for a in self.zone.neighbours}, axis=1))
 
     def weather(self) -> pd.DataFrame:
         return self._cached("weather", lambda: weather(self.zone.sites, "2024-01-01", self.end))

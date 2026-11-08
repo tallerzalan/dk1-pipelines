@@ -69,24 +69,43 @@ class BmtX(PriceModel):
         return out
 
 
-def lasso_bic(X: np.ndarray, y: np.ndarray, n_alphas: int = 100, min_ratio: float = 1e-4) -> tuple[float, np.ndarray]:
-    """Lasso on standardised inputs, with the penalty chosen by BIC along a path. Same objective and path as glmnet.
-    Returns the intercept and coefficients on the original scale."""
-    n = len(y)
-    x_mean, x_sd = X.mean(axis=0), X.std(axis=0)
-    used = x_sd > 0
-    Z = (X[:, used] - x_mean[used]) / x_sd[used]
-    y_mean = y.mean()
-    yc = y - y_mean
-    top = np.abs(Z.T @ yc).max() / n
-    alphas = top * np.geomspace(1, min_ratio, n_alphas)
-    _, paths, _ = lasso_path(Z, yc, alphas=alphas, tol=1e-7, max_iter=20_000)
-    rss = ((yc[:, None] - Z @ paths) ** 2).sum(axis=0)
-    bic = n * np.log(rss / n) + (paths != 0).sum(axis=0) * np.log(n)
-    best = paths[:, int(np.argmin(bic))] / x_sd[used]
-    coef = np.zeros(X.shape[1])
-    coef[used] = best
-    return float(y_mean - x_mean @ coef), coef
+class LassoBic:
+    """Lasso on standardised inputs, with the penalty chosen by BIC along glmnet's path of 100 penalties.
+    The inputs are the same for all 24 hours, so they are standardised and their Gram matrix computed once, and each hour
+    only solves along its own path. The path stops early, as glmnet's does, once BIC is clearly past its best."""
+
+    def __init__(self, X: np.ndarray, n_alphas: int = 100, min_ratio: float = 1e-4, first: int = 60):
+        self.n = len(X)
+        self.mean, self.sd = X.mean(axis=0), X.std(axis=0)
+        self.used = self.sd > 0
+        self.Z = (X[:, self.used] - self.mean[self.used]) / self.sd[self.used]
+        self.gram = self.Z.T @ self.Z
+        self.grid = np.geomspace(1, min_ratio, n_alphas)
+        self.first = first
+
+    def _path(self, yc: np.ndarray, xy: np.ndarray, steps: int) -> np.ndarray:
+        alphas = np.abs(xy).max() / self.n * self.grid[:steps]
+        return lasso_path(self.Z, yc, alphas=alphas, precompute=self.gram, Xy=xy, tol=1e-6, max_iter=20_000)[1]
+
+    def fit(self, y: np.ndarray) -> tuple[float, np.ndarray]:
+        """Intercept and coefficients on the original scale."""
+        y_mean = y.mean()
+        yc = y - y_mean
+        xy = self.Z.T @ yc
+        for steps in (self.first, len(self.grid)):
+            paths = self._path(yc, xy, steps)
+            rss = ((yc[:, None] - self.Z @ paths) ** 2).sum(axis=0)
+            bic = self.n * np.log(rss / self.n) + (paths != 0).sum(axis=0) * np.log(self.n)
+            best = int(np.argmin(bic))
+            if best < steps - 1:  # the best penalty is inside the part computed, so the rest of the path can't matter
+                break
+        coef = np.zeros(len(self.mean))
+        coef[self.used] = paths[:, best] / self.sd[self.used]
+        return float(y_mean - self.mean @ coef), coef
+
+
+def lasso_bic(X: np.ndarray, y: np.ndarray) -> tuple[float, np.ndarray]:
+    return LassoBic(X).fit(y)
 
 
 class LearX(PriceModel):
@@ -98,9 +117,10 @@ class LearX(PriceModel):
         keep = inputs.keep
         X = np.column_stack([inputs.X[keep], features.X_dow[keep]])
         today = np.r_[inputs.X[day], features.X_dow[day]]
+        lasso = LassoBic(X)
         out = np.empty(24)
         for hour in range(24):
-            intercept, coef = lasso_bic(X, inputs.target(features.P[keep, hour]))
+            intercept, coef = lasso.fit(inputs.target(features.P[keep, hour]))
             out[hour] = inputs.invert(intercept + today @ coef)
         return out
 
