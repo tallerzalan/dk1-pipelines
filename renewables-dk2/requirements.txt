@@ -3,4 +3,5 @@ lightgbm
 matplotlib
 pandas
 requests
+scikit-learn
 statsmodels
