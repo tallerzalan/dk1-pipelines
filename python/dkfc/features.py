@@ -7,6 +7,9 @@ import pandas as pd
 TZ = "Europe/Copenhagen"
 PRICE_LAGS = (1, 2, 3, 7)
 MAD_SCALE = 1.4826
+# the input groups beside the zone's own prices (see inputs.csv). a weather group missing on the forecast day is left out
+GROUPS = ("nb", "hol", "wx", "wxde")
+WEATHER_GROUPS = {"wx": ("wind", "solar"), "wxde": ("de_wind", "de_solar")}
 
 
 def mad(x: np.ndarray) -> float:
@@ -96,6 +99,15 @@ class Features:
                         "de_wind": daily_matrix(wind_power(weather_germany), self.dates),
                         "de_solar": daily_matrix(radiation(weather_germany), self.dates)}
 
+    def _weather(self, groups) -> list[np.ndarray]:
+        return [self.weather[k] for g in WEATHER_GROUPS if g in groups for k in WEATHER_GROUPS[g]]
+
+    def available_groups(self, day: int) -> tuple[str, ...]:
+        """The groups a forecast for `day` can use: a weather group with a gap on that day is dropped, so there is
+        still a forecast."""
+        return tuple(g for g in GROUPS if g not in WEATHER_GROUPS
+                     or not any(np.isnan(self.weather[k][day]).any() for k in WEATHER_GROUPS[g]))
+
     def complete_days(self, start: str) -> np.ndarray:
         return np.flatnonzero((self.dates >= start) & ~np.isnan(self.P).any(axis=1))
 
@@ -103,18 +115,19 @@ class Features:
         window = self.P[train]
         return float(np.nanmedian(window)), mad(window)
 
-    def linear_inputs(self, day: int, window: int = 730) -> Inputs:
+    def linear_inputs(self, day: int, window: int = 730, groups=GROUPS) -> Inputs:
         """Design matrix for the linear models. Refuses a day with missing inputs, so nothing is silently imputed."""
         train = np.arange(day - window, day)
         median, scale = self.scales(train)
         blocks = [np.arcsinh((self.X_price - median) / scale)]
-        for matrix in self.neighbours.values():
+        for matrix in self.neighbours.values() if "nb" in groups else ():
             tr = matrix[train]
             s = mad(tr)
             s = s if np.isfinite(s) and s > 0 else np.nanstd(tr, ddof=1)
             blocks.append(np.arcsinh((matrix - np.nanmedian(tr)) / s))
-        blocks.append(self.hol)
-        for matrix in self.weather.values():
+        if "hol" in groups:
+            blocks.append(self.hol)
+        for matrix in self._weather(groups):
             tr = matrix[train]
             blocks.append((matrix - np.nanmean(tr)) / np.nanstd(tr, ddof=1))
         X = np.hstack(blocks)
@@ -123,15 +136,17 @@ class Features:
         complete = ~np.isnan(X[train]).any(axis=1) & ~np.isnan(self.P[train]).any(axis=1)
         return Inputs(X, train[complete], median, scale)
 
-    def tree_design(self, rows: np.ndarray) -> np.ndarray:
+    def tree_design(self, rows: np.ndarray, groups=GROUPS) -> np.ndarray:
         """One row per day and hour, for the tree model. Trees handle missing values, so training rows may have gaps."""
         rep = lambda x: np.repeat(x, 24)
         d1 = self.lags[1][rows]
         columns = [np.tile(np.arange(24), len(rows)), rep(self.dow[rows])]
         columns += [self.lags[k][rows].ravel() for k in PRICE_LAGS]
         columns += [rep(d1.mean(axis=1)), rep(d1.min(axis=1)), rep(d1.max(axis=1)), rep(d1[:, 23])]
-        for matrix in [*self.neighbours.values(), *self.weather.values()]:
+        neighbours = list(self.neighbours.values()) if "nb" in groups else []
+        for matrix in [*neighbours, *self._weather(groups)]:
             m = matrix[rows]
             columns += [m.ravel(), rep(m.mean(axis=1))]
-        columns += [rep(self.hol[rows, 0]), rep(self.hol[rows, 1])]
+        if "hol" in groups:
+            columns += [rep(self.hol[rows, 0]), rep(self.hol[rows, 1])]
         return np.column_stack(columns)

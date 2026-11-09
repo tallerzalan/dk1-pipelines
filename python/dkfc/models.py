@@ -6,7 +6,7 @@ import xgboost as xgb
 from scipy.stats import norm
 from sklearn.linear_model import lasso_path
 
-from .features import Features
+from .features import GROUPS, Features
 
 WINDOW = 730
 
@@ -15,8 +15,8 @@ class PriceModel(ABC):
     name: str
 
     @abstractmethod
-    def forecast(self, features: Features, day: int) -> np.ndarray:
-        """24 prices in EUR/MWh."""
+    def forecast(self, features: Features, day: int, groups=GROUPS) -> np.ndarray:
+        """24 prices in EUR/MWh, from the zone's own prices plus the input groups."""
 
 
 def select_by_testing(E: np.ndarray, y: np.ndarray, df: int, ss: np.ndarray, pval: float = 0.05) -> list[int]:
@@ -49,8 +49,8 @@ class BmtX(PriceModel):
     """One linear model per hour, on the inputs that survive strict significance testing."""
     name = "bmtx"
 
-    def forecast(self, features: Features, day: int) -> np.ndarray:
-        inputs = features.linear_inputs(day, WINDOW)
+    def forecast(self, features: Features, day: int, groups=GROUPS) -> np.ndarray:
+        inputs = features.linear_inputs(day, WINDOW, groups)
         keep = inputs.keep
         X = inputs.X[keep]
         controls = np.column_stack([np.ones(len(keep)), features.X_dow[keep, 1:]])  # monday is the baseline
@@ -112,8 +112,8 @@ class LearX(PriceModel):
     """One lasso per hour, all inputs at once, with the useless ones shrunk to zero."""
     name = "learx"
 
-    def forecast(self, features: Features, day: int) -> np.ndarray:
-        inputs = features.linear_inputs(day, WINDOW)
+    def forecast(self, features: Features, day: int, groups=GROUPS) -> np.ndarray:
+        inputs = features.linear_inputs(day, WINDOW, groups)
         keep = inputs.keep
         X = np.column_stack([inputs.X[keep], features.X_dow[keep]])
         today = np.r_[inputs.X[day], features.X_dow[day]]
@@ -134,13 +134,13 @@ class XgbX(PriceModel):
                            subsample=0.8, colsample_bytree=0.8, nthread=1)
         self.rounds = rounds
 
-    def forecast(self, features: Features, day: int) -> np.ndarray:
+    def forecast(self, features: Features, day: int, groups=GROUPS) -> np.ndarray:
         train = np.arange(day - WINDOW, day)
         median, scale = features.scales(train)
-        X_today = features.tree_design(np.array([day]))
+        X_today = features.tree_design(np.array([day]), groups)
         if np.isnan(X_today).any():
             raise ValueError(f"missing inputs for {features.dates[day]:%Y-%m-%d}")
-        X = features.tree_design(train)
+        X = features.tree_design(train, groups)
         y = np.arcsinh((features.P[train].ravel() - median) / scale)
         keep = ~np.isnan(y)
         seed = int((features.dates[day] - np.datetime64("1970-01-01")) / np.timedelta64(1, "D"))

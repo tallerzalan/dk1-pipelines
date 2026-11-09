@@ -30,20 +30,25 @@ def get_json(url: str, params: dict, tries: int = 8) -> dict:
     raise RuntimeError(f"no answer from {url} after {tries} tries")
 
 
-def eds(dataset: str, start: str, end: str, area: str) -> pd.DataFrame:
-    body = get_json(EDS + dataset, {"start": start, "end": end, "limit": 0, "filter": json.dumps({"PriceArea": [area]})})
-    return pd.DataFrame(body["records"])
+def eds(dataset: str, start: str, end: str, areas: list[str]) -> pd.DataFrame:
+    body = get_json(EDS + dataset, {"start": start, "end": end, "limit": 0, "filter": json.dumps({"PriceArea": list(areas)})})
+    return pd.DataFrame(body["records"], columns=["PriceArea", "HourUTC", "SpotPriceEUR", "TimeUTC", "DayAheadPriceEUR"])
 
 
-def area_prices(area: str, start: str, end: str) -> pd.Series:
-    """Hourly day-ahead prices with a UTC index. Quarter-hours are averaged, and an hour with a missing quarter is dropped."""
-    old = eds("Elspotprices", start, SWITCH, area)
-    new = eds("DayAheadPrices", SWITCH, end, area)
-    hourly = pd.Series(old["SpotPriceEUR"].to_numpy(dtype=float), index=pd.to_datetime(old["HourUTC"], utc=True))
-    quarters = pd.Series(new["DayAheadPriceEUR"].to_numpy(dtype=float), index=pd.to_datetime(new["TimeUTC"], utc=True))
-    grouped = quarters.groupby(quarters.index.floor("h"))
-    combined = pd.concat([hourly, grouped.mean()[grouped.count() == 4]]).dropna()
-    return combined[~combined.index.duplicated()].sort_index()
+def area_prices(areas: list[str], start: str, end: str) -> pd.DataFrame:
+    """Hourly day-ahead prices, one column per area, with a UTC index. Quarter-hours are averaged, and an hour with a
+    missing quarter is left empty. All areas come in one request, as the service limits how often it may be asked."""
+    hourly = []
+    if start < SWITCH:
+        old = eds("Elspotprices", start, SWITCH, areas)
+        hourly.append(old.assign(time=pd.to_datetime(old["HourUTC"], utc=True), price=old["SpotPriceEUR"].astype(float)))
+    new = eds("DayAheadPrices", max(start, SWITCH), end, areas)
+    new = new.assign(time=pd.to_datetime(new["TimeUTC"], utc=True).dt.floor("h"), price=new["DayAheadPriceEUR"].astype(float))
+    grouped = new.groupby(["time", "PriceArea"])["price"].agg(["mean", "count"])
+    quarters = grouped.loc[grouped["count"] == 4, "mean"].rename("price").reset_index()
+    long = pd.concat([*(h[["time", "PriceArea", "price"]] for h in hourly), quarters]).dropna()
+    long = long.drop_duplicates(["time", "PriceArea"])
+    return long.pivot(index="time", columns="PriceArea", values="price").reindex(columns=list(areas)).sort_index()
 
 
 def site_weather(site: Site, start: str, end: str) -> pd.Series:
@@ -84,11 +89,10 @@ class MarketData:
     HISTORY_FROM = "2023-06-01"
 
     def prices(self) -> pd.Series:
-        return self._cached("prices", lambda: area_prices(self.zone.code, self.HISTORY_FROM, self.end).to_frame("price"))["price"]
+        return self._cached("prices", lambda: area_prices([self.zone.code], self.HISTORY_FROM, self.end)[self.zone.code].dropna().to_frame("price"))["price"]
 
     def neighbours(self) -> pd.DataFrame:
-        return self._cached("neighbours", lambda: pd.concat(
-            {a: area_prices(a, self.HISTORY_FROM, self.end) for a in self.zone.neighbours}, axis=1))
+        return self._cached("neighbours", lambda: area_prices(list(self.zone.neighbours), self.HISTORY_FROM, self.end))
 
     def weather(self) -> pd.DataFrame:
         return self._cached("weather", lambda: weather(self.zone.sites, "2024-01-01", self.end))
