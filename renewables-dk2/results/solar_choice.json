@@ -1,0 +1,6 @@
+{
+  "weather": "ecmwf",
+  "models": true,
+  "extras": true,
+  "params": "base"
+}

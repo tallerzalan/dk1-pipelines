@@ -1,0 +1,4 @@
+target,hours,ours,energinet,energinet_scaled,p_vs_energinet,p_vs_scaled,beaten
+onshore,7297,36.8207,36.1284,31.1299,0.6821,1.0,False
+offshore,7201,90.0557,110.0985,112.0307,0.0,0.0,True
+solar,7297,35.518,34.4069,33.2187,0.761,0.9666,False

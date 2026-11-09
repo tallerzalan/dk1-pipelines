@@ -1,0 +1,20 @@
+{
+  "onshore": {
+    "weather": "ecmwf",
+    "models": true,
+    "extras": true,
+    "params": "fewer leaves"
+  },
+  "offshore": {
+    "weather": "ecmwf",
+    "models": true,
+    "extras": true,
+    "params": "slower"
+  },
+  "solar": {
+    "weather": "ecmwf",
+    "models": true,
+    "extras": true,
+    "params": "base"
+  }
+}

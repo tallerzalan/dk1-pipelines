@@ -1,0 +1,4 @@
+  target  hours   ours  energinet  energinet_scaled  p_vs_energinet  p_vs_scaled  beaten
+ onshore   7297 36.821     36.128            31.130           0.682        1.000   False
+offshore   7201 90.056    110.098           112.031           0.000        0.000    True
+   solar   7297 35.518     34.407            33.219           0.761        0.967   False

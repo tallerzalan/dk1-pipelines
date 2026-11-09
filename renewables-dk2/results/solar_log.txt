@@ -1,0 +1,10 @@
+round 1 model: 25.1
+fleet size over a year: 26.9 
+sun position and panel radiation: 25.2 
+other models off: 26.2 
+{
+  "weather": "ecmwf",
+  "models": true,
+  "extras": true,
+  "params": "base"
+}
